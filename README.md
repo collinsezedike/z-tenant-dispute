@@ -48,12 +48,9 @@ placeholder mechanism stay the same.
 
 ## Setup
 
-Before first use, the tenant SDK must create the `secrets` KV map and write
-a Stripe **test-mode** secret key:
-
-```text
-z_sdk.kv("secrets").set("stripe_secret_key", "sk_test_your_key_here")
-```
+Before first use, the tenant SDK must write a Stripe **test-mode** secret
+key into the tenant's `secrets` KV map — see `driver/` below for the actual
+script pattern.
 
 ## Host capabilities required
 
@@ -73,6 +70,45 @@ cargo build --release
 
 Targets `wasm32-wasip2` (see `.cargo/config.toml`), producing a WASM
 component per `crate-type = ["cdylib", "lib"]`.
+
+## Driver scripts (`driver/`)
+
+Node/TypeScript scripts that drive the ADK auth flow and registration —
+what actually produced the deployment status below:
+
+- `driver/quickstart.ts` — authenticates against T3N testnet and prints the
+  resulting `tenantDid`.
+- `driver/register.ts` — builds on the same auth flow, reads the compiled
+  `../target/wasm32-wasip2/release/z_tenant_dispute.wasm`, and registers it
+  via `tenant.contracts.register()`.
+- `driver/verify.ts` — lists the calling tenant's registered contracts via
+  `tenant.contracts.listDetailed()`, to confirm a registration went through.
+
+```bash
+cd driver
+pnpm install
+cp .env.example .env   # fill in T3N_API_KEY from the ADK claim page
+npx tsx quickstart.ts
+npx tsx register.ts
+npx tsx verify.ts
+```
+
+`package.json` pins `@terminal3/t3n-sdk` to exactly `5.2.0` — see "Known
+issue" below for why that pin is load-bearing, not incidental.
+
+Not yet exercised in this environment: seeding `stripe_secret_key` into the
+tenant's `secrets` KV map and invoking the registered contract's three
+functions against live Stripe test data (needs a Stripe test-mode account,
+not obtained during this build). Seeding follows the pattern documented in
+the ADK docs:
+
+```typescript
+await tenant.executeControl("map-entry-set", {
+  map_name: tenant.canonicalName("secrets"),
+  key:      "stripe_secret_key",
+  value:    process.env.STRIPE_SECRET_KEY!,
+});
+```
 
 ## Testing a dispute end-to-end (Stripe test mode)
 
