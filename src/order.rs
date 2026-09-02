@@ -1,10 +1,10 @@
 //! check_order: looks up the payment/order record behind a transaction.
 //!
 //! Reference build treats a Stripe PaymentIntent as the order record (many
-//! restaurant POS stacks process card payments through Stripe under the
-//! hood). Swap `STRIPE_BASE` + the request/response shapes for your own POS
-//! provider's order-lookup endpoint in a production deployment — the
-//! contract, WIT interface, and secret-handling pattern stay the same.
+//! e-commerce platforms process card payments through Stripe under the
+//! hood). Swap `STRIPE_BASE` + the request/response shapes for your own
+//! order-management system's lookup endpoint in a production deployment —
+//! the contract, WIT interface, and secret-handling pattern stay the same.
 
 #[derive(serde::Deserialize)]
 pub struct CheckOrderReq {

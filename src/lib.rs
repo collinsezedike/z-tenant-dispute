@@ -1,4 +1,4 @@
-//! z-tenant-dispute v0.1.0 — restaurant chargeback & dispute agent.
+//! z-tenant-dispute v0.1.0 — e-commerce chargeback & dispute agent.
 //!
 //! Given a disputed transaction, this contract:
 //!   - `check-order`: looks up the underlying payment/order status (no PII).

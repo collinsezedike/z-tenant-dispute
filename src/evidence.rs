@@ -63,7 +63,7 @@ fn submit_dispute_evidence_wasm(req: SubmitEvidenceReq) -> Result<EvidenceResult
     let customer_email = "{{profile.verified_contacts.email.value}}";
 
     let uncategorized_text = alloc::format!(
-        "Order {} fulfilled and verified by restaurant systems prior to dispute filing.",
+        "Order {} fulfilled and verified by retailer systems prior to dispute filing.",
         req.order_id
     );
 

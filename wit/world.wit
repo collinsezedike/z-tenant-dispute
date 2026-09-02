@@ -1,8 +1,8 @@
-/// z-tenant-dispute WIT world — restaurant chargeback & dispute agent.
+/// z-tenant-dispute WIT world — e-commerce chargeback & dispute agent.
 ///
-/// A B2B agent for multi-location restaurant groups that investigates a
-/// disputed card transaction and prepares dispute evidence for submission
-/// to the payment processor (Stripe, in test mode for this reference build).
+/// A B2B agent for online retailers that investigates a disputed card
+/// transaction and prepares dispute evidence for submission to the payment
+/// processor (Stripe, in test mode for this reference build).
 ///
 /// Imports required host capabilities:
 ///   - tenant-context:        tenant DID, cluster timestamp
@@ -43,7 +43,7 @@ interface contracts {
         context:      option<list<u8>>,
     }
 
-    /// Look up the restaurant's order/payment record for a transaction.
+    /// Look up the retailer's order/payment record for a transaction.
     /// Input  (JSON): { payment_intent_id }
     /// Output (JSON): { id, status, amount, currency, created }
     /// Carries no PII: only an opaque payment-intent id crosses the boundary.

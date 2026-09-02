@@ -1,12 +1,13 @@
 # z-tenant-dispute
 
-A B2B restaurant chargeback & dispute agent for the Terminal 3 Network (T3N)
+A B2B e-commerce chargeback & dispute agent for the Terminal 3 Network (T3N)
 ADK Agent Build Challenge. Runs as a Rust contract compiled to a WASM
 component inside T3N's trusted execution environment (TEE).
 
 ## What it does
 
-A restaurant group gives the agent a disputed transaction. The agent:
+An online retailer's payments/ops team gives the agent a disputed
+transaction. The agent:
 
 1. **`check-order`** — looks up the underlying payment/order status (no PII
    involved; a plain synchronous HTTP call).
@@ -23,23 +24,24 @@ A restaurant group gives the agent a disputed transaction. The agent:
 
 ## Why this needs a TEE
 
-A restaurant group's payment-processor credentials and its customers'
-identities are exactly the combination an enterprise security team cares
-about. Isolating both — secrets that never sit in plaintext config, and PII
-that never crosses into contract memory — turns "trust us" into an
+E-commerce chargeback volume is high enough that most retailers run a
+dedicated ops function just to fight them, and doing so means handing an
+automation system both payment-processor credentials and disputing
+customers' identities — exactly the combination an enterprise security team
+cares about. Isolating both — secrets that never sit in plaintext config,
+and PII that never crosses into contract memory — turns "trust us" into an
 architectural guarantee instead of a policy.
 
 ## Reference build: Stripe test mode
 
 This reference implementation targets the Stripe API in test mode:
 
-- `check-order` reads a Stripe **PaymentIntent** (many restaurant POS stacks
-  process card payments through Stripe under the hood).
+- `check-order` reads a Stripe **PaymentIntent** representing the order.
 - `get-payment-dispute` reads a Stripe **Dispute**.
 - `submit-dispute-evidence` updates a Stripe **Dispute**'s evidence via its
   form-urlencoded update endpoint.
 
-To point this at a different POS/payment stack in production, swap the
+To point this at a different order/payment stack in production, swap the
 `STRIPE_BASE` constant and the request/response shapes in `src/order.rs` and
 `src/dispute.rs` — the WIT interface, secret-handling pattern, and PII
 placeholder mechanism stay the same.
