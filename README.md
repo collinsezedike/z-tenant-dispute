@@ -81,11 +81,46 @@ test card number (`4000000000000259`) when creating a PaymentIntent — the
 dispute appears on the PaymentIntent shortly after the charge succeeds. See
 Stripe's testing docs for the current list of dispute-triggering test cards.
 
-## Known issue filed against T3N
+## Deployment status
 
-While setting up this project, the ADK quickstart's `fetchTrustedManifest("testnet")`
-consistently failed with `Trust manifest ... is malformed` on SDK versions
-5.4.0 and 5.5.0, even though the raw manifest endpoint
-(`https://cn-api.sg.testnet.t3n.terminal3.io/api/trust-manifest`) returns a
-well-formed 200 JSON response when queried directly with `curl`. Filed as a
-bug per the challenge's submission requirements.
+Registered and live on T3N testnet:
+
+```json
+{
+  "name": "z:cbdb56e651c06e2c34a40a87f27490a6faa05826:dispute-contracts",
+  "short_name": "dispute-contracts",
+  "version": "0.1.0",
+  "status": "active"
+}
+```
+
+Confirmed via `tenant.contracts.listDetailed()` after registering through
+`tenant.contracts.register()`.
+
+## Known issue filed against T3N: `fetchTrustedManifest` regression
+
+The ADK quickstart's `fetchTrustedManifest("testnet")` fails with
+`Trust manifest ... is malformed` on every published SDK version from
+`5.3.0` through the current latest (`5.7.0` at the time of writing) —
+including the versions the quickstart docs currently have you install fresh.
+
+**Root cause**, confirmed by resolving the SDK's own minified string table
+directly (not guesswork): `isSignedTrustManifest()` — the shape check
+`fetchTrustedManifest` runs before signature verification — requires the
+manifest response to include an `rtmr1_allowlist: string[]` field. The live
+testnet endpoint (`https://cn-api.sg.testnet.t3n.terminal3.io/api/trust-manifest`)
+returns a well-formed, signed 200 JSON response, but it has never emitted
+`rtmr1_allowlist` — only `cluster`, `version`, `peer_ids`, `rtmr3_allowlist`,
+`signed_at`, and `signature`. That field requirement was added in SDK
+`5.3.0`; every version before it (`5.0.0`–`5.2.0`) validates the exact same
+live manifest successfully. There is no safe client-side workaround: the
+manifest's `signature` is a server-side hash over the canonical payload
+minus `signature` itself, so patching in a synthetic `rtmr1_allowlist`
+client-side to pass the shape check breaks signature verification instead.
+
+**Workaround used to unblock this submission:** pin
+`@terminal3/t3n-sdk` to `5.2.0` (the last version before the regression) in
+the tenant-side Node/TypeScript project that drives auth and registration.
+The contract itself (this repo) is unaffected — the regression is entirely
+in the JS/TS SDK's client-side manifest validator, not in anything the Rust
+contract does.
