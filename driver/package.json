@@ -1,0 +1,17 @@
+{
+  "name": "z-tenant-dispute-driver",
+  "version": "1.0.0",
+  "description": "Auth + registration driver for the z-tenant-dispute contract. Pins @terminal3/t3n-sdk to 5.2.0 deliberately -- see the README's 'Known issue' section: every SDK version from 5.3.0 onward fails fetchTrustedManifest against the current testnet endpoint.",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@terminal3/t3n-sdk": "5.2.0",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.13"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
