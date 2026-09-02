@@ -1,0 +1,66 @@
+/// z-tenant-dispute WIT world — restaurant chargeback & dispute agent.
+///
+/// A B2B agent for multi-location restaurant groups that investigates a
+/// disputed card transaction and prepares dispute evidence for submission
+/// to the payment processor (Stripe, in test mode for this reference build).
+///
+/// Imports required host capabilities:
+///   - tenant-context:        tenant DID, cluster timestamp
+///   - logging:               debug / info / error lines
+///   - kv-store:              reads the `secrets` map for the Stripe secret key
+///   - http:                  order + dispute lookups (carry no PII)
+///   - http-with-placeholders: dispute evidence submission — the body carries
+///                            `{{profile.<field>}}` markers the host resolves
+///                            from the calling user's profile at dispatch time,
+///                            so the disputing customer's PII never enters
+///                            WASM memory.
+///
+/// The Stripe secret key is stored in the z: KV map `z:<tid>:secrets` under
+/// the key `stripe_secret_key`. The contract builds the full map name at
+/// runtime using `tenant-context.tenant-did()`. The map is created and
+/// populated by the tenant SDK before the contract runs — no secret
+/// interface is needed.
+package z:tenant-dispute@0.1.0;
+
+world tenant-dispute {
+    import host:tenant/tenant-context@1.0.0;
+    import host:interfaces/logging@2.1.0;
+    import host:interfaces/kv-store@2.1.0;
+    import host:interfaces/http@2.1.0;                    // order + dispute lookups (no PII)
+    import host:interfaces/http-with-placeholders@2.1.0;  // evidence submission (PII via placeholders)
+
+    export contracts;
+}
+
+interface contracts {
+    /// Standard 3-field envelope used by all contracts callable from the node.
+    /// `input`        — JSON-serialized request payload specific to the function.
+    /// `user-profile` — always None for tenant contracts (hardcoded at dispatch).
+    /// `context`      — JSON-serialized DynamicContext (node-minted, trusted).
+    record generic-input {
+        input:        option<list<u8>>,
+        user-profile: option<list<u8>>,
+        context:      option<list<u8>>,
+    }
+
+    /// Look up the restaurant's order/payment record for a transaction.
+    /// Input  (JSON): { payment_intent_id }
+    /// Output (JSON): { id, status, amount, currency, created }
+    /// Carries no PII: only an opaque payment-intent id crosses the boundary.
+    check-order: func(req: generic-input) -> result<list<u8>, string>;
+
+    /// Look up the current state of a payment dispute (chargeback).
+    /// Input  (JSON): { dispute_id }
+    /// Output (JSON): { id, status, reason, amount, currency, evidence_due_by }
+    /// Carries no PII: only an opaque dispute id crosses the boundary.
+    get-payment-dispute: func(req: generic-input) -> result<list<u8>, string>;
+
+    /// Submit dispute evidence to the payment processor. The evidence body
+    /// templates `{{profile.<field>}}` markers for the disputing customer's
+    /// name and contact details; the host resolves them from the calling
+    /// user's profile via http-with-placeholders, so the contract never
+    /// holds plaintext customer PII.
+    /// Input  (JSON): { dispute_id, product_description, order_id }
+    /// Output (JSON): { id, status }
+    submit-dispute-evidence: func(req: generic-input) -> result<list<u8>, string>;
+}
