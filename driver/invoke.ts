@@ -1,5 +1,14 @@
+// Invokes one exported function on the registered dispute-contracts
+// contract.
+//
+// Usage:
+//   npx tsx invoke.ts <function-name> '<json-input>'
+// Examples:
+//   npx tsx invoke.ts check-order '{"order_ref":"T123456","provider":"paystack"}'
+//   npx tsx invoke.ts get-payment-dispute '{"dispute_id":"1","provider":"paystack"}'
+//   npx tsx invoke.ts submit-dispute-evidence '{"dispute_id":"1","order_id":"ORD-1","product_description":"Dinner for two","provider":"paystack"}'
+
 import "dotenv/config";
-import { readFile } from "fs/promises";
 import {
   T3nClient,
   TenantClient,
@@ -11,6 +20,16 @@ import {
   createEthAuthInput,
   fetchTrustedManifest,
 } from "@terminal3/t3n-sdk";
+
+const [functionName, inputJson] = process.argv.slice(2);
+if (!functionName || !inputJson) {
+  console.error(
+    "Usage: npx tsx invoke.ts <function-name> '<json-input>'"
+  );
+  process.exit(1);
+}
+
+const parsedInput = JSON.parse(inputJson);
 
 setEnvironment("testnet");
 
@@ -34,29 +53,19 @@ await t3n.handshake();
 const did = await t3n.authenticate(createEthAuthInput(address));
 const tenantDid = did.value;
 
-console.log("Connected as:", tenantDid);
-
 const tenant = new TenantClient({
   t3n,
   tenantDid,
   baseUrl: NODE_URLS.testnet,
 });
 
-const WASM_PATH = "../target/wasm32-wasip2/release/z_tenant_dispute.wasm";
 const CONTRACT_TAIL = "dispute-contracts";
 const CONTRACT_VERSION = "0.2.0";
 
-const wasmBytes = await readFile(WASM_PATH);
-console.log(`Read ${wasmBytes.length} bytes from ${WASM_PATH}`);
-
-const result = await tenant.contracts.register({
-  tail: CONTRACT_TAIL,
+const result = await tenant.contracts.execute(CONTRACT_TAIL, {
   version: CONTRACT_VERSION,
-  wasm: wasmBytes,
+  functionName,
+  input: parsedInput,
 });
 
-const tenantIdHex = tenantDid.slice("did:t3n:".length);
-const scriptName = `z:${tenantIdHex}:${CONTRACT_TAIL}`;
-
-console.log(`Registered ${scriptName} as contract id ${result.contract_id}`);
-console.log("Full result:", JSON.stringify(result, null, 2));
+console.log(JSON.stringify(result, null, 2));

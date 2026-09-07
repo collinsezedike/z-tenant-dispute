@@ -22,6 +22,10 @@ transaction. The agent:
    from the calling user's profile at dispatch time. Plaintext customer PII
    never enters WASM memory.
 
+All three functions accept an optional `provider` field (`"stripe"` or
+`"paystack"`, defaulting to `"stripe"`) so a single deployed contract can
+serve either payment processor — see "Two providers" below.
+
 ## Why this needs a TEE
 
 E-commerce chargeback volume is high enough that most retailers run a
@@ -32,25 +36,44 @@ cares about. Isolating both — secrets that never sit in plaintext config,
 and PII that never crosses into contract memory — turns "trust us" into an
 architectural guarantee instead of a policy.
 
-## Reference build: Stripe test mode
+## Two providers: Stripe and Paystack (test mode)
 
-This reference implementation targets the Stripe API in test mode:
+Every function's JSON input carries an optional `provider` field
+(`"stripe"` or `"paystack"`, default `"stripe"`) — see `src/provider.rs`.
+Both paths ship in this same contract build:
 
-- `check-order` reads a Stripe **PaymentIntent** representing the order.
-- `get-payment-dispute` reads a Stripe **Dispute**.
-- `submit-dispute-evidence` updates a Stripe **Dispute**'s evidence via its
-  form-urlencoded update endpoint.
+| Function | Stripe | Paystack |
+| --- | --- | --- |
+| `check-order` | `GET /v1/payment_intents/:id` | `GET /transaction/verify/:reference` |
+| `get-payment-dispute` | `GET /v1/disputes/:id` | `GET /dispute/:id` |
+| `submit-dispute-evidence` | `POST /v1/disputes/:id` (form-urlencoded) | `POST /dispute/:id/evidence` (JSON) |
+| Secret KV key | `stripe_secret_key` | `paystack_secret_key` |
 
-To point this at a different order/payment stack in production, swap the
-`STRIPE_BASE` constant and the request/response shapes in `src/order.rs` and
-`src/dispute.rs` — the WIT interface, secret-handling pattern, and PII
-placeholder mechanism stay the same.
+Paystack's `Add Evidence` endpoint takes plain JSON
+(`customer_name`/`customer_email`/`customer_phone`), so the PII placeholder
+markers go in as ordinary string values — no custom encoding needed there.
+Stripe's dispute-update endpoint is form-urlencoded, which is why
+`evidence.rs` has a small hand-rolled `form_encode()` that percent-encodes
+literal values while leaving `{`, `}`, `.` unescaped so the `{{profile.x}}`
+markers survive intact for the host to substitute.
+
+Paystack's exact response field names for the dispute-lookup path
+(`category`, `dueAt`) are taken from public docs/search rather than a
+verified live call at the time of writing, and are parsed defensively (soft
+fallback to empty, not a hard failure) pending validation against a real
+sandbox dispute — see the code comments in `src/dispute.rs`.
+
+To add a third provider, or point either path at a different order/payment
+stack in production, add a `Provider` variant and a matching branch in
+`src/order.rs` / `src/dispute.rs` / `src/evidence.rs` — the WIT interface,
+secret-handling pattern, and PII placeholder mechanism stay the same
+regardless of how many providers are wired in.
 
 ## Setup
 
-Before first use, the tenant SDK must write a Stripe **test-mode** secret
-key into the tenant's `secrets` KV map — see `driver/` below for the actual
-script pattern.
+Before first use, the tenant SDK must write the relevant provider's
+**test-mode** secret key into the tenant's `secrets` KV map — see `driver/`
+below for the actual script pattern.
 
 ## Host capabilities required
 
@@ -83,6 +106,11 @@ what actually produced the deployment status below:
   via `tenant.contracts.register()`.
 - `driver/verify.ts` — lists the calling tenant's registered contracts via
   `tenant.contracts.listDetailed()`, to confirm a registration went through.
+- `driver/seed-secret.ts` — writes a named secret into the tenant's
+  `secrets` KV map (`stripe_secret_key` or `paystack_secret_key`) via
+  `tenant.executeControl("map-entry-set", ...)`.
+- `driver/invoke.ts` — calls one exported function on the registered
+  contract via `tenant.contracts.execute()`, for live end-to-end testing.
 
 ```bash
 cd driver
@@ -91,47 +119,50 @@ cp .env.example .env   # fill in T3N_API_KEY from the ADK claim page
 npx tsx quickstart.ts
 npx tsx register.ts
 npx tsx verify.ts
+
+# seed a secret, then invoke (Paystack example):
+npx tsx seed-secret.ts paystack_secret_key sk_test_xxxxxxxx
+npx tsx invoke.ts check-order '{"order_ref":"T123456","provider":"paystack"}'
 ```
 
 `package.json` pins `@terminal3/t3n-sdk` to exactly `5.2.0` — see "Known
 issue" below for why that pin is load-bearing, not incidental.
 
-Not yet exercised in this environment: seeding `stripe_secret_key` into the
-tenant's `secrets` KV map and invoking the registered contract's three
-functions against live Stripe test data (needs a Stripe test-mode account,
-not obtained during this build). Seeding follows the pattern documented in
-the ADK docs:
+## Testing a dispute end-to-end
 
-```typescript
-await tenant.executeControl("map-entry-set", {
-  map_name: tenant.canonicalName("secrets"),
-  key:      "stripe_secret_key",
-  value:    process.env.STRIPE_SECRET_KEY!,
-});
-```
-
-## Testing a dispute end-to-end (Stripe test mode)
-
-Stripe's test mode supports triggering a synthetic dispute using a special
+**Stripe test mode** supports triggering a synthetic dispute using a special
 test card number (`4000000000000259`) when creating a PaymentIntent — the
 dispute appears on the PaymentIntent shortly after the charge succeeds. See
 Stripe's testing docs for the current list of dispute-triggering test cards.
 
+**Paystack test mode**: not yet confirmed whether there's an equivalent
+documented way to synthetically trigger a dispute — flagged as an open
+question rather than assumed to work, pending a real test against a
+sandbox account.
+
 ## Deployment status
 
-Registered and live on T3N testnet:
+Registered and live on T3N testnet (v0.2.0, dual-provider):
 
 ```json
 {
   "name": "z:cbdb56e651c06e2c34a40a87f27490a6faa05826:dispute-contracts",
   "short_name": "dispute-contracts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "status": "active"
 }
 ```
 
 Confirmed via `tenant.contracts.listDetailed()` after registering through
-`tenant.contracts.register()`.
+`tenant.contracts.register()`. Note: re-registering the same tail with a new
+version allocates a new `contract_id` (869 → 917 going from v0.1.0 to
+v0.2.0) — the tenant SDK docs call this out explicitly, and it holds in
+practice.
+
+Not yet exercised in this environment: seeding either provider's secret key
+and invoking the contract's three functions against live test data — needs
+a Paystack (or Stripe) test-mode secret key, not yet plugged in during this
+build session.
 
 ## Known issue filed against T3N: `fetchTrustedManifest` regression
 

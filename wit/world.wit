@@ -2,12 +2,15 @@
 ///
 /// A B2B agent for online retailers that investigates a disputed card
 /// transaction and prepares dispute evidence for submission to the payment
-/// processor (Stripe, in test mode for this reference build).
+/// processor. Supports Stripe and Paystack (test mode for this reference
+/// build) — every function's JSON input carries an optional `provider`
+/// field (`"stripe"` or `"paystack"`, defaulting to `"stripe"`) that
+/// selects which one; see `src/provider.rs`.
 ///
 /// Imports required host capabilities:
 ///   - tenant-context:        tenant DID, cluster timestamp
 ///   - logging:               debug / info / error lines
-///   - kv-store:              reads the `secrets` map for the Stripe secret key
+///   - kv-store:              reads the `secrets` map for the processor secret key
 ///   - http:                  order + dispute lookups (carry no PII)
 ///   - http-with-placeholders: dispute evidence submission — the body carries
 ///                            `{{profile.<field>}}` markers the host resolves
@@ -15,12 +18,12 @@
 ///                            so the disputing customer's PII never enters
 ///                            WASM memory.
 ///
-/// The Stripe secret key is stored in the z: KV map `z:<tid>:secrets` under
-/// the key `stripe_secret_key`. The contract builds the full map name at
-/// runtime using `tenant-context.tenant-did()`. The map is created and
-/// populated by the tenant SDK before the contract runs — no secret
-/// interface is needed.
-package z:tenant-dispute@0.1.0;
+/// The processor secret key is stored in the z: KV map `z:<tid>:secrets`
+/// under `stripe_secret_key` or `paystack_secret_key`, matching the
+/// request's provider. The contract builds the full map name at runtime
+/// using `tenant-context.tenant-did()`. The map is created and populated by
+/// the tenant SDK before the contract runs — no secret interface is needed.
+package z:tenant-dispute@0.2.0;
 
 world tenant-dispute {
     import host:tenant/tenant-context@1.0.0;
@@ -44,13 +47,16 @@ interface contracts {
     }
 
     /// Look up the retailer's order/payment record for a transaction.
-    /// Input  (JSON): { payment_intent_id }
+    /// Input  (JSON): { order_ref, provider? }
+    ///   `order_ref` is a Stripe PaymentIntent id or a Paystack transaction
+    ///   reference, depending on `provider`. `payment_intent_id` /
+    ///   `reference` are accepted as aliases for `order_ref`.
     /// Output (JSON): { id, status, amount, currency, created }
-    /// Carries no PII: only an opaque payment-intent id crosses the boundary.
+    /// Carries no PII: only an opaque order reference crosses the boundary.
     check-order: func(req: generic-input) -> result<list<u8>, string>;
 
     /// Look up the current state of a payment dispute (chargeback).
-    /// Input  (JSON): { dispute_id }
+    /// Input  (JSON): { dispute_id, provider? }
     /// Output (JSON): { id, status, reason, amount, currency, evidence_due_by }
     /// Carries no PII: only an opaque dispute id crosses the boundary.
     get-payment-dispute: func(req: generic-input) -> result<list<u8>, string>;
@@ -60,7 +66,7 @@ interface contracts {
     /// name and contact details; the host resolves them from the calling
     /// user's profile via http-with-placeholders, so the contract never
     /// holds plaintext customer PII.
-    /// Input  (JSON): { dispute_id, product_description, order_id }
+    /// Input  (JSON): { dispute_id, product_description, order_id, provider? }
     /// Output (JSON): { id, status }
     submit-dispute-evidence: func(req: generic-input) -> result<list<u8>, string>;
 }

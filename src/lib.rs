@@ -1,19 +1,21 @@
-//! z-tenant-dispute v0.1.0 — e-commerce chargeback & dispute agent.
+//! z-tenant-dispute v0.2.0 — e-commerce chargeback & dispute agent.
 //!
 //! Given a disputed transaction, this contract:
 //!   - `check-order`: looks up the underlying payment/order status (no PII).
 //!   - `get-payment-dispute`: looks up the chargeback/dispute status (no PII).
 //!   - `submit-dispute-evidence`: assembles and submits dispute evidence to
-//!     the payment processor (Stripe, in this reference build). The
-//!     disputing customer's name and contact info are NEVER passed in as a
-//!     contract argument: the contract templates `{{profile.<field>}}`
-//!     markers into the evidence body and the host's
+//!     the payment processor. Each function accepts an optional `provider`
+//!     field (`stripe` or `paystack`, defaulting to `stripe`) — see
+//!     `provider.rs`. The disputing customer's name and contact info are
+//!     NEVER passed in as a contract argument: the contract templates
+//!     `{{profile.<field>}}` markers into the evidence body and the host's
 //!     `http-with-placeholders` interface resolves them from the calling
 //!     user's profile at dispatch time, so plaintext customer PII never
 //!     enters WASM memory.
 //!
-//! The Stripe secret key is read from the z: KV map `secrets` (key:
-//! `stripe_secret_key`). This map is created and populated by the tenant SDK
+//! The payment-processor secret key is read from the z: KV map `secrets`
+//! (key: `stripe_secret_key` or `paystack_secret_key`, matching the
+//! request's provider). This map is created and populated by the tenant SDK
 //! before the contract runs.
 //!
 //! # Host-capability requirements
@@ -30,18 +32,15 @@
 //!
 //! # Setup
 //!
-//! Before first use, the tenant SDK must create the `secrets` KV map and
-//! write the Stripe secret key:
-//! ```text
-//! // Via the tenant SDK (before contract first use):
-//! z_sdk.kv("secrets").set("stripe_secret_key", "sk_test_your_key_here")
-//! ```
+//! Before first use, the tenant SDK must write the relevant provider's
+//! secret key into the tenant's `secrets` KV map — see `driver/` for the
+//! actual script pattern.
 #![warn(clippy::style, missing_debug_implementations)]
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 extern crate alloc;
 
-pub const CONTRACT_VERSION: &str = "0.1.0";
+pub const CONTRACT_VERSION: &str = "0.2.0";
 
 wit_bindgen::generate!({
     world: "tenant-dispute",
@@ -56,6 +55,7 @@ wit_bindgen::generate!({
 mod dispute;
 mod evidence;
 mod order;
+mod provider;
 
 struct Component;
 
