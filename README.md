@@ -223,12 +223,31 @@ Stripe, against a freshly created test-mode PaymentIntent:
 }
 ```
 
-Not yet exercised: `get-payment-dispute` and `submit-dispute-evidence` on
-either provider — both need a transaction that actually has a dispute on
-it. Stripe's is self-serve via a test card (see "Testing a dispute
-end-to-end" above); Paystack's isn't, for the reasons covered there.
+`get-payment-dispute` against Stripe, using `pm_card_createDispute` (see
+"Testing a dispute end-to-end" below) to create a real disputed
+PaymentIntent:
 
-## Known issue filed against T3N: `fetchTrustedManifest` regression
+```json
+{
+  "id": "du_1UD7wGLIEmw77WfU9BIC0xDT",
+  "status": "needs_response",
+  "reason": "fraudulent",
+  "amount": 500,
+  "currency": "usd",
+  "evidence_due_by": "1789516799"
+}
+```
+
+`submit-dispute-evidence` — **confirmed non-functional on Stripe, for a
+platform-level reason, not a contract bug** — see "Known issue #2" below.
+Confirmed reaching real placeholder resolution on Paystack (fails only on a
+caller-profile gap, `PlaceholderUnknown: verified_contacts.phone.value` —
+not a contract or platform bug, just this test tenant's own T3N user
+profile not having that field populated).
+
+## Known issues filed against T3N
+
+### Issue #1: `fetchTrustedManifest` regression
 
 The ADK quickstart's `fetchTrustedManifest("testnet")` fails with
 `Trust manifest ... is malformed` on every published SDK version from
@@ -255,3 +274,43 @@ the tenant-side Node/TypeScript project that drives auth and registration.
 The contract itself (this repo) is unaffected — the regression is entirely
 in the JS/TS SDK's client-side manifest validator, not in anything the Rust
 contract does.
+
+### Issue #2: `http-with-placeholders` requires a JSON body, incompatible with form-urlencoded upstream APIs
+
+Live-tested, not a guess: a contract using `http-with-placeholders` to call
+an upstream API that requires `application/x-www-form-urlencoded` (Stripe's
+classic REST API, for one — `/v1/disputes/:id` and much of the rest of
+their API) cannot currently work on T3N.
+
+**Root cause:** the host parses the *placeholder-resolved* body as JSON
+before forwarding it upstream, regardless of the `Content-Type` header the
+contract sets. A form-urlencoded body fails host-side with
+`upstream: parse resolved body: expected value at line 1 column 1` before
+the request ever reaches the upstream API — confirmed via this repo's own
+`submit-dispute-evidence` (Stripe path) failing with exactly that error.
+Stripe's API, on the other side, explicitly rejects a JSON body for this
+endpoint (`"check that your POST content type is application/x-www-form-urlencoded"`
+— verified directly against the live Stripe API, not assumed). The two
+requirements are mutually exclusive; no encoding choice on the contract's
+side can reconcile them.
+
+**Impact:** any T3N contract that needs to send PII-bearing data to a
+form-urlencoded-only upstream API cannot use `http-with-placeholders` for
+that call today. This isn't specific to Stripe or to disputes — it affects
+every upstream API on Stripe's classic REST surface, and presumably any
+other provider whose API predates JSON-body support.
+
+**Suggested fix on T3N's end:** either accept non-JSON bodies through
+`http-with-placeholders` (skip the parse-and-reserialize step for bodies
+that aren't valid JSON, doing raw substring substitution instead — which is
+what this contract's own `form_encode()` was written assuming would
+happen), or document the JSON-only constraint explicitly so contract
+authors don't discover it by shipping a call that can never succeed.
+
+**Status in this submission:** the Stripe evidence-submission code path is
+implemented exactly to Stripe's real API spec (verified against Stripe's
+docs) and left in place rather than removed, since it's correct code
+blocked by a platform constraint outside this contract's control — see the
+comment block at the top of `src/evidence.rs`. The Paystack path is
+unaffected (JSON-native) and is confirmed reaching real placeholder
+resolution — see "Deployment status" above.

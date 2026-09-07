@@ -16,6 +16,24 @@
 //! `Add Evidence` endpoint takes plain JSON with `customer_name` /
 //! `customer_email` / `customer_phone` fields, so the placeholder markers go
 //! in as ordinary JSON string values — no custom encoding needed there.
+//!
+//! CONFIRMED PLATFORM LIMITATION (live-tested, not a guess): the Stripe path
+//! above cannot currently succeed on T3N testnet. `http-with-placeholders`
+//! parses the *resolved* body as JSON before forwarding it upstream — a
+//! form-urlencoded body fails host-side with
+//! `upstream: parse resolved body: expected value at line 1 column 1`
+//! before the request ever reaches Stripe. Stripe's `/v1/disputes/:id`, in
+//! turn, explicitly rejects a JSON body
+//! (`"check that your POST content type is application/x-www-form-urlencoded"`)
+//! — verified directly against the live Stripe API, not assumed. These two
+//! requirements are mutually exclusive, so no header or encoding choice on
+//! the contract's side can reconcile them; this needs either a
+//! non-JSON-only `http-with-placeholders` mode on the host, or a Stripe
+//! integration path that doesn't need one. The Paystack path is unaffected
+//! (its API is JSON-native) and is confirmed working up to the point where
+//! the *calling user's* T3N profile needs `verified_contacts.phone.value`
+//! populated (`PlaceholderUnknown` otherwise — a caller-account gap, not a
+//! contract bug).
 
 use crate::provider::Provider;
 
