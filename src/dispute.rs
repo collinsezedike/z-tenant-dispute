@@ -4,10 +4,13 @@
 //! (defaults to `stripe`). Neither path needs customer PII to look up a
 //! dispute by id, and none is sent.
 //!
-//! The Paystack response's exact field names (`dueAt` etc.) are taken from
-//! public docs/search rather than a live call at time of writing — parsed
-//! defensively (soft fallbacks, not hard failures) pending validation
-//! against a real sandbox dispute.
+//! The Paystack response fields are verified against Paystack's published
+//! OpenAPI spec (github.com/PaystackOSS/openapi, `dist/paystack.yaml`,
+//! `DisputeFetchResponse` schema) — not a live call, but the actual
+//! contract Paystack publishes, not a guess. One field (`dueAt`) is typed
+//! only as `nullable: true` in that spec with no explicit type, so its
+//! string-ness is inferred by analogy with sibling fields and parsed
+//! defensively rather than hard-failed.
 
 use crate::provider::Provider;
 
@@ -133,11 +136,23 @@ fn get_dispute_paystack(dispute_id: &str) -> Result<DisputeStatus, String> {
         .or_else(|| data["id"].as_str().map(|s| s.to_string()))
         .ok_or("missing data.id")?;
     let status = data["status"].as_str().ok_or("missing data.status")?.to_string();
-    // Best-effort: Paystack's category/reason field name is not confirmed
-    // against a live call yet — fall back to empty rather than hard-fail.
-    let reason = data["category"].as_str().unwrap_or_default().to_string();
-    let amount = data["amount"].as_i64().unwrap_or(0);
-    let currency = data["currency"].as_str().unwrap_or_default().to_string();
+    let reason = data["category"].as_str().ok_or("missing data.category")?.to_string();
+    // The Dispute object has no top-level `amount` field (confirmed against
+    // Paystack's published OpenAPI spec) — only `refund_amount`, which is a
+    // resolution-time figure, and the original disputed amount nested at
+    // `data.transaction.amount`. The latter is the correct match for
+    // Stripe's `dispute.amount` semantics ("the amount in question"), so
+    // that's what this reads.
+    let amount = data["transaction"]["amount"]
+        .as_i64()
+        .ok_or("missing data.transaction.amount")?;
+    let currency = data["currency"].as_str().ok_or("missing data.currency")?.to_string();
+    // `dueAt` is confirmed as the real field name (Paystack OpenAPI spec),
+    // but the spec declares it only as `nullable: true` with no explicit
+    // type — inferred as an ISO-8601 string by analogy with the sibling
+    // `createdAt`/`updatedAt`/`resolvedAt` fields, which the spec does type
+    // as strings. Soft fallback here, not a hard failure, since that
+    // inference isn't 100% certain without a live response to check.
     let evidence_due_by = data["dueAt"].as_str().unwrap_or_default().to_string();
 
     let _ = logging::info(&alloc::format!(

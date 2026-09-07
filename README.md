@@ -57,11 +57,16 @@ Stripe's dispute-update endpoint is form-urlencoded, which is why
 literal values while leaving `{`, `}`, `.` unescaped so the `{{profile.x}}`
 markers survive intact for the host to substitute.
 
-Paystack's exact response field names for the dispute-lookup path
-(`category`, `dueAt`) are taken from public docs/search rather than a
-verified live call at the time of writing, and are parsed defensively (soft
-fallback to empty, not a hard failure) pending validation against a real
-sandbox dispute — see the code comments in `src/dispute.rs`.
+Paystack's response fields are verified against Paystack's published
+OpenAPI spec (`github.com/PaystackOSS/openapi`, `dist/paystack.yaml`) rather
+than guessed from docs/search — an earlier pass had a real bug here
+(`get-payment-dispute` read a top-level `amount` field that doesn't exist
+on Paystack's Dispute object; the correct field is `data.transaction.amount`,
+found only after pulling the actual schema) — see the code comments in
+`src/dispute.rs` for the full trail. One field (`dueAt`) is typed only as
+`nullable: true` in the spec with no explicit type, so its string-ness is
+inferred by analogy with sibling fields and parsed defensively rather than
+hard-failed.
 
 To add a third provider, or point either path at a different order/payment
 stack in production, add a `Provider` variant and a matching branch in
@@ -135,10 +140,15 @@ test card number (`4000000000000259`) when creating a PaymentIntent — the
 dispute appears on the PaymentIntent shortly after the charge succeeds. See
 Stripe's testing docs for the current list of dispute-triggering test cards.
 
-**Paystack test mode**: not yet confirmed whether there's an equivalent
-documented way to synthetically trigger a dispute — flagged as an open
-question rather than assumed to work, pending a real test against a
-sandbox account.
+**Paystack test mode**: checked (Paystack's OpenAPI spec plus general web
+search) and there does not appear to be a publicly documented equivalent to
+Stripe's dispute-triggering test cards — Paystack's test-mode docs cover
+card/PIN/OTP test values for payment flows but not synthetic dispute
+creation. `check-order` (transaction verify) is fully testable against
+Paystack's sandbox as-is; exercising `get-payment-dispute` and
+`submit-dispute-evidence` end-to-end needs either a real dispute or
+whatever manual test-data support Paystack's dashboard/support team can
+provide, since there's no self-serve way to fabricate one.
 
 ## Deployment status
 
