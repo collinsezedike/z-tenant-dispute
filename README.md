@@ -126,6 +126,11 @@ what actually produced the deployment status below:
   `tenant.executeControl("map-entry-set", ...)`.
 - `driver/invoke.ts` — calls one exported function on the registered
   contract via `tenant.contracts.execute()`, for live end-to-end testing.
+- `driver/init-stripe-test-intent.ts` — creates a real Stripe test-mode
+  PaymentIntent (test-data setup only, doesn't go through the contract) so
+  there's a genuine id to run `check-order` against. Reads the seeded
+  `stripe_secret_key` back and uses it only inside a `fetch()` call, never
+  passed to a subprocess.
 
 ```bash
 cd driver
@@ -190,10 +195,11 @@ version allocates a new `contract_id` (869 → 917 going from v0.1.0 to
 v0.2.0) — the tenant SDK docs call this out explicitly, and it holds in
 practice.
 
-**Live-verified**: `check-order` against Paystack, invoked end-to-end
+**Live-verified**: `check-order` against both providers, invoked end-to-end
 through T3N (auth → contract dispatch → KV secret read → real outbound HTTP
-to Paystack → parsed response back through the WIT boundary) against a real
-transaction reference:
+→ parsed response back through the WIT boundary).
+
+Paystack, against a real (2022) transaction reference:
 
 ```json
 {
@@ -205,10 +211,22 @@ transaction reference:
 }
 ```
 
-Not yet exercised: `get-payment-dispute` and `submit-dispute-evidence`
-(needs a transaction that actually has a dispute on it — see "Testing a
-dispute end-to-end" above for why that's not self-serve on Paystack), and
-the Stripe path end-to-end (secret seeded, live invocation pending).
+Stripe, against a freshly created test-mode PaymentIntent:
+
+```json
+{
+  "id": "pi_3UD7joLIEmw77WfU1iRrUsJe",
+  "status": "requires_payment_method",
+  "amount": 5000,
+  "currency": "usd",
+  "created": "1788807472"
+}
+```
+
+Not yet exercised: `get-payment-dispute` and `submit-dispute-evidence` on
+either provider — both need a transaction that actually has a dispute on
+it. Stripe's is self-serve via a test card (see "Testing a dispute
+end-to-end" above); Paystack's isn't, for the reasons covered there.
 
 ## Known issue filed against T3N: `fetchTrustedManifest` regression
 
