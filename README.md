@@ -111,6 +111,16 @@ what actually produced the deployment status below:
   via `tenant.contracts.register()`.
 - `driver/verify.ts` — lists the calling tenant's registered contracts via
   `tenant.contracts.listDetailed()`, to confirm a registration went through.
+- `driver/setup-secrets-map.ts` — creates the tenant's `secrets` KV map
+  (`tenant.maps.create()`) with readers/writers scoped to the current
+  contract id. **Required once before the first `seed-secret.ts` call** —
+  `map-entry-set` writes into an existing map, it does not create one, and
+  fails with `map not found` otherwise.
+- `driver/grant-egress.ts` — sets a self-grant (`t3n.agentAuthUpdate()`) so
+  the calling DID may invoke the contract's functions and reach
+  `api.paystack.co` / `api.stripe.com`. **Also required once** — without it,
+  outbound calls fail with `host/http.egress_denied` even though auth, KV
+  read, and dispatch all succeed first.
 - `driver/seed-secret.ts` — writes a named secret into the tenant's
   `secrets` KV map (`stripe_secret_key` or `paystack_secret_key`) via
   `tenant.executeControl("map-entry-set", ...)`.
@@ -125,6 +135,10 @@ npx tsx quickstart.ts
 npx tsx register.ts
 npx tsx verify.ts
 
+# one-time setup (per contract_id — re-run after a version bump):
+npx tsx setup-secrets-map.ts 917
+npx tsx grant-egress.ts
+
 # seed a secret, then invoke (Paystack example):
 npx tsx seed-secret.ts paystack_secret_key sk_test_xxxxxxxx
 npx tsx invoke.ts check-order '{"order_ref":"T123456","provider":"paystack"}'
@@ -132,6 +146,13 @@ npx tsx invoke.ts check-order '{"order_ref":"T123456","provider":"paystack"}'
 
 `package.json` pins `@terminal3/t3n-sdk` to exactly `5.2.0` — see "Known
 issue" below for why that pin is load-bearing, not incidental.
+
+**Security note:** never pass a secret key as a shell/CLI argument to a
+subprocess you don't fully control the error handling of — an earlier pass
+at a test-data-setup script leaked a raw key into a thrown error message
+that included the full command line. `seed-secret.ts` and `invoke.ts` both
+take the key via `argv`/`.env` and use it only inside SDK calls, never
+inside a shelled-out command.
 
 ## Testing a dispute end-to-end
 
@@ -169,10 +190,25 @@ version allocates a new `contract_id` (869 → 917 going from v0.1.0 to
 v0.2.0) — the tenant SDK docs call this out explicitly, and it holds in
 practice.
 
-Not yet exercised in this environment: seeding either provider's secret key
-and invoking the contract's three functions against live test data — needs
-a Paystack (or Stripe) test-mode secret key, not yet plugged in during this
-build session.
+**Live-verified**: `check-order` against Paystack, invoked end-to-end
+through T3N (auth → contract dispatch → KV secret read → real outbound HTTP
+to Paystack → parsed response back through the WIT boundary) against a real
+transaction reference:
+
+```json
+{
+  "id": "1983692332",
+  "status": "success",
+  "amount": 500000,
+  "currency": "NGN",
+  "created": "2022-07-29T23:25:08.000Z"
+}
+```
+
+Not yet exercised: `get-payment-dispute` and `submit-dispute-evidence`
+(needs a transaction that actually has a dispute on it — see "Testing a
+dispute end-to-end" above for why that's not self-serve on Paystack), and
+the Stripe path end-to-end (secret seeded, live invocation pending).
 
 ## Known issue filed against T3N: `fetchTrustedManifest` regression
 
