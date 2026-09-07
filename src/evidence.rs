@@ -47,7 +47,7 @@ pub struct SubmitEvidenceReq {
     pub provider: Provider,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, serde::Serialize)]
 pub struct EvidenceResult {
     pub id: String,
     pub status: String,
@@ -78,29 +78,86 @@ pub fn submit_dispute_evidence(input: &[u8]) -> Result<Vec<u8>, String> {
     }
 }
 
+/// Percent-encode a value for an `application/x-www-form-urlencoded` body,
+/// leaving `{`, `}`, and `.` unescaped so `{{profile.x}}` markers stay
+/// intact for host-side placeholder resolution. Stripe-only — Paystack's
+/// JSON body needs no such encoding. Pure function, testable natively.
+fn form_encode(s: &str) -> alloc::string::String {
+    let mut out = alloc::string::String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'{' | b'}' => {
+                out.push(b as char)
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&alloc::format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+/// Builds the Stripe dispute-update body: form-urlencoded, with
+/// `{{profile.x}}` placeholder markers for the customer's identity. Pure
+/// function — see the tests below, including one proving this body is
+/// (correctly, per Stripe's own requirement) NOT valid JSON, which is
+/// exactly why it can't currently pass through T3N's `http-with-placeholders`
+/// (see Bug #2 in the module doc comment / README).
+fn build_stripe_evidence_body(order_id: &str, product_description: &str) -> alloc::string::String {
+    let customer_name = "{{profile.first_name}} {{profile.last_name}}";
+    let customer_email = "{{profile.verified_contacts.email.value}}";
+    let uncategorized_text = alloc::format!(
+        "Order {order_id} fulfilled and verified by retailer systems prior to dispute filing."
+    );
+
+    alloc::format!(
+        "evidence[customer_name]={}&evidence[customer_email_address]={}&evidence[product_description]={}&evidence[uncategorized_text]={}",
+        form_encode(customer_name),
+        form_encode(customer_email),
+        form_encode(product_description),
+        form_encode(&uncategorized_text),
+    )
+}
+
+/// Builds the Paystack Add Evidence body: plain JSON, with `{{profile.x}}`
+/// placeholder markers as ordinary string values. Pure function.
+fn build_paystack_evidence_body(product_description: &str) -> serde_json::Value {
+    serde_json::json!({
+        "customer_name": "{{profile.first_name}} {{profile.last_name}}",
+        "customer_email": "{{profile.verified_contacts.email.value}}",
+        "customer_phone": "{{profile.verified_contacts.phone.value}}",
+        "service_details": product_description,
+    })
+}
+
+/// Parses a Stripe dispute-update response into `EvidenceResult`. Pure
+/// function.
+fn parse_stripe_evidence_response(d: &serde_json::Value) -> Result<EvidenceResult, String> {
+    let id = d["id"].as_str().ok_or("missing id")?.to_string();
+    let status = d["status"].as_str().ok_or("missing status")?.to_string();
+    Ok(EvidenceResult { id, status })
+}
+
+/// Parses a Paystack Add Evidence response into `EvidenceResult`. Pure
+/// function — see the fixture-based test below, built from Paystack's
+/// verified `DisputeAddEvidenceResponse` OpenAPI schema.
+fn parse_paystack_evidence_response(wrapper: &serde_json::Value) -> EvidenceResult {
+    let data = &wrapper["data"];
+    let id = data["id"]
+        .as_i64()
+        .map(|n| n.to_string())
+        .or_else(|| data["id"].as_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+    let status = wrapper["message"].as_str().unwrap_or("submitted").to_string();
+    EvidenceResult { id, status }
+}
+
 #[cfg(target_arch = "wasm32")]
 use crate::host::interfaces::{http_with_placeholders as hwp, logging};
 
 #[cfg(target_arch = "wasm32")]
 fn submit_evidence_stripe(req: &SubmitEvidenceReq) -> Result<EvidenceResult, String> {
     let api_key = crate::provider::get_secret(Provider::Stripe)?;
-
-    // Resolved from the calling user's profile (privacy-preserving path):
-    let customer_name = "{{profile.first_name}} {{profile.last_name}}";
-    let customer_email = "{{profile.verified_contacts.email.value}}";
-
-    let uncategorized_text = alloc::format!(
-        "Order {} fulfilled and verified by retailer systems prior to dispute filing.",
-        req.order_id
-    );
-
-    let body = alloc::format!(
-        "evidence[customer_name]={}&evidence[customer_email_address]={}&evidence[product_description]={}&evidence[uncategorized_text]={}",
-        form_encode(customer_name),
-        form_encode(customer_email),
-        form_encode(&req.product_description),
-        form_encode(&uncategorized_text),
-    );
+    let body = build_stripe_evidence_body(&req.order_id, &req.product_description);
 
     let _ = logging::info(&alloc::format!(
         "Submitting Stripe evidence for dispute {}",
@@ -129,33 +186,20 @@ fn submit_evidence_stripe(req: &SubmitEvidenceReq) -> Result<EvidenceResult, Str
 
     let d: serde_json::Value =
         serde_json::from_slice(&resp.payload).map_err(|e| e.to_string())?;
-
-    let id = d["id"].as_str().ok_or("missing id")?.to_string();
-    let status = d["status"].as_str().ok_or("missing status")?.to_string();
+    let result = parse_stripe_evidence_response(&d)?;
 
     let _ = logging::info(&alloc::format!(
-        "Stripe dispute evidence submitted: id={id} status={status}"
+        "Stripe dispute evidence submitted: id={} status={}",
+        result.id, result.status
     ));
 
-    Ok(EvidenceResult { id, status })
+    Ok(result)
 }
 
 #[cfg(target_arch = "wasm32")]
 fn submit_evidence_paystack(req: &SubmitEvidenceReq) -> Result<EvidenceResult, String> {
-    use serde_json::json;
-
     let api_key = crate::provider::get_secret(Provider::Paystack)?;
-
-    // Resolved from the calling user's profile (privacy-preserving path):
-    // Paystack's Add Evidence endpoint takes plain JSON, so the placeholder
-    // markers go in as ordinary string values — the host substitutes them
-    // before the outbound call the same way it does for Stripe's form body.
-    let body = json!({
-        "customer_name": "{{profile.first_name}} {{profile.last_name}}",
-        "customer_email": "{{profile.verified_contacts.email.value}}",
-        "customer_phone": "{{profile.verified_contacts.phone.value}}",
-        "service_details": req.product_description,
-    });
+    let body = build_paystack_evidence_body(&req.product_description);
 
     let _ = logging::info(&alloc::format!(
         "Submitting Paystack evidence for dispute {}",
@@ -184,39 +228,14 @@ fn submit_evidence_paystack(req: &SubmitEvidenceReq) -> Result<EvidenceResult, S
 
     let wrapper: serde_json::Value =
         serde_json::from_slice(&resp.payload).map_err(|e| e.to_string())?;
-    let data = &wrapper["data"];
-
-    let id = data["id"]
-        .as_i64()
-        .map(|n| n.to_string())
-        .or_else(|| data["id"].as_str().map(|s| s.to_string()))
-        .unwrap_or_default();
-    let status = wrapper["message"].as_str().unwrap_or("submitted").to_string();
+    let result = parse_paystack_evidence_response(&wrapper);
 
     let _ = logging::info(&alloc::format!(
-        "Paystack dispute evidence submitted: id={id} status={status}"
+        "Paystack dispute evidence submitted: id={} status={}",
+        result.id, result.status
     ));
 
-    Ok(EvidenceResult { id, status })
-}
-
-/// Percent-encode a value for an `application/x-www-form-urlencoded` body,
-/// leaving `{`, `}`, and `.` unescaped so `{{profile.x}}` markers stay
-/// intact for host-side placeholder resolution. Stripe-only — Paystack's
-/// JSON body needs no such encoding.
-#[cfg(target_arch = "wasm32")]
-fn form_encode(s: &str) -> alloc::string::String {
-    let mut out = alloc::string::String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'{' | b'}' => {
-                out.push(b as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&alloc::format!("%{:02X}", b)),
-        }
-    }
-    out
+    Ok(result)
 }
 
 /// Render a typed `http-with-placeholders` error as a contract-facing string.
@@ -328,5 +347,102 @@ mod tests {
         assert!(result
             .unwrap_err()
             .contains("only implemented on the wasm32 target"));
+    }
+
+    #[test]
+    fn stripe_evidence_body_carries_unmodified_placeholder_markers() {
+        let body = build_stripe_evidence_body("ORD-7219", "Dinner for two");
+        // form_encode leaves `{`, `}`, `.` unescaped so the host recognises
+        // the markers — assert the exact literal markers survive intact.
+        assert!(body.contains("{{profile.first_name}}"));
+        assert!(body.contains("{{profile.last_name}}"));
+        assert!(body.contains("{{profile.verified_contacts.email.value}}"));
+        assert!(body.contains("ORD-7219"));
+        assert!(body.contains("Dinner"));
+    }
+
+    #[test]
+    fn paystack_evidence_body_carries_unmodified_placeholder_markers() {
+        let body = build_paystack_evidence_body("Dinner for two");
+        assert_eq!(body["customer_name"], "{{profile.first_name}} {{profile.last_name}}");
+        assert_eq!(body["customer_email"], "{{profile.verified_contacts.email.value}}");
+        assert_eq!(body["customer_phone"], "{{profile.verified_contacts.phone.value}}");
+        assert_eq!(body["service_details"], "Dinner for two");
+    }
+
+    /// This is the concrete, runnable proof behind Bug #2 (see the module
+    /// doc comment and README "Known issues"): T3N's `http-with-placeholders`
+    /// parses the resolved body as JSON before forwarding it upstream.
+    /// Stripe's body — built to Stripe's real, required
+    /// `application/x-www-form-urlencoded` spec — is provably NOT valid
+    /// JSON, which is exactly why the live host call fails with
+    /// `parse resolved body: expected value at line 1 column 1`. Paystack's
+    /// JSON body, by contrast, parses cleanly — exactly why that path
+    /// reaches real placeholder resolution live. Not asserted from prose;
+    /// asserted from the actual bytes this contract sends.
+    #[test]
+    fn stripe_body_is_not_json_but_paystack_body_is() {
+        let stripe_body = build_stripe_evidence_body("ORD-7219", "Dinner for two");
+        let stripe_parse_result: Result<serde_json::Value, _> =
+            serde_json::from_str(&stripe_body);
+        assert!(
+            stripe_parse_result.is_err(),
+            "Stripe's evidence body must NOT be valid JSON (it's the required \
+             form-urlencoded shape) — this is the root cause of Bug #2, not \
+             an accident to fix"
+        );
+
+        let paystack_body = build_paystack_evidence_body("Dinner for two");
+        let paystack_bytes = serde_json::to_vec(&paystack_body).unwrap();
+        let paystack_parse_result: Result<serde_json::Value, _> =
+            serde_json::from_slice(&paystack_bytes);
+        assert!(
+            paystack_parse_result.is_ok(),
+            "Paystack's evidence body IS valid JSON — this is why that path \
+             reaches real placeholder resolution live, unlike Stripe's"
+        );
+    }
+
+    #[test]
+    fn parse_stripe_evidence_response_matches_real_shape() {
+        // Stripe's Dispute object shape (id, status) is already
+        // live-verified via get-payment-dispute — this fixture reuses that
+        // confirmed shape for the post-update response, which mirrors it.
+        let fixture = serde_json::json!({
+            "id": "du_1UD7wGLIEmw77WfU9BIC0xDT",
+            "object": "dispute",
+            "status": "under_review"
+        });
+        let result = parse_stripe_evidence_response(&fixture).unwrap();
+        assert_eq!(result.id, "du_1UD7wGLIEmw77WfU9BIC0xDT");
+        assert_eq!(result.status, "under_review");
+    }
+
+    /// Fixture built from Paystack's verified `DisputeAddEvidenceResponse`
+    /// OpenAPI schema (github.com/PaystackOSS/openapi, `dist/paystack.yaml`)
+    /// — not a live capture, since reaching this response requires a
+    /// verified caller profile (see README), but the shape is confirmed
+    /// against the published spec.
+    #[test]
+    fn parse_paystack_evidence_response_matches_verified_schema() {
+        let fixture = serde_json::json!({
+            "status": true,
+            "message": "Evidence created",
+            "data": {
+                "customer_email": "customer@example.com",
+                "customer_name": "Test Customer",
+                "customer_phone": "+2348012345678",
+                "service_details": "Dinner for two",
+                "delivery_address": "",
+                "delivery_date": "",
+                "dispute": 4734583785_i64,
+                "id": 991,
+                "createdAt": "2026-09-06T00:00:00.000Z",
+                "updatedAt": "2026-09-06T00:00:00.000Z"
+            }
+        });
+        let result = parse_paystack_evidence_response(&fixture);
+        assert_eq!(result.id, "991");
+        assert_eq!(result.status, "Evidence created");
     }
 }

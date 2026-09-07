@@ -99,6 +99,40 @@ cargo build --release
 Targets `wasm32-wasip2` (see `.cargo/config.toml`), producing a WASM
 component per `crate-type = ["cdylib", "lib"]`.
 
+## Local test suite
+
+```bash
+cargo test --target x86_64-pc-windows-msvc   # or your host triple — see note below
+```
+
+26 tests, all passing, that don't need a live T3N connection, network
+access, or either payment processor's credentials — a maintainer can run
+these offline. The response-parsing logic in `order.rs`/`dispute.rs`/
+`evidence.rs` is factored into pure functions (no host-interface calls)
+specifically so it's testable this way. Notably:
+
+- Several tests use **real response bodies captured from this contract's
+  own live invocations** during development (Stripe PaymentIntent, Stripe
+  Dispute, Paystack transaction verify) — not hand-typed guesses.
+- Where a live capture wasn't available (Paystack's Dispute and Add
+  Evidence responses — no self-serve way to create a Paystack test
+  dispute), the fixtures are built from Paystack's **verified published
+  OpenAPI schema** instead of guessed.
+- `parse_paystack_dispute_response_rejects_top_level_amount` is a
+  regression test locking in a real bug found and fixed during
+  development (an earlier version read a non-existent `data.amount` field).
+- `stripe_body_is_not_json_but_paystack_body_is` is a concrete, runnable
+  proof of Known Issue #2 below: it asserts, from the actual bytes this
+  contract builds, that Stripe's required request body is not valid JSON
+  while Paystack's is — which is exactly why one path can complete live on
+  T3N today and the other structurally cannot.
+
+Note: `.cargo/config.toml` defaults the build target to `wasm32-wasip2`,
+which can't execute natively on most dev machines (`cargo test` alone will
+try to run `.wasm` test binaries and fail with an OS-level exec error) —
+pass `--target <your-host-triple>` (find yours with `rustc -vV`) to run
+tests against native code instead.
+
 ## Driver scripts (`driver/`)
 
 Node/TypeScript scripts that drive the ADK auth flow and registration —
@@ -131,6 +165,18 @@ what actually produced the deployment status below:
   there's a genuine id to run `check-order` against. Reads the seeded
   `stripe_secret_key` back and uses it only inside a `fetch()` call, never
   passed to a subprocess.
+- `driver/init-stripe-dispute.ts` — creates a real disputed Stripe
+  PaymentIntent using the documented `pm_card_createDispute` test
+  PaymentMethod, then polls for the resulting dispute id — the genuine
+  Stripe dispute this repo's `get-payment-dispute` live-verification result
+  came from.
+- `driver/check-secret-presence.ts` — confirms a named secret exists in the
+  `secrets` map, without ever printing its value.
+- `driver/setup-profile.ts` — attempts to populate this test tenant's own
+  T3N user profile (needed for `submit-dispute-evidence`'s
+  `{{profile.verified_contacts.*}}` placeholders to resolve). Currently
+  blocked by a testnet infrastructure issue — see "Testing a dispute
+  end-to-end" below.
 
 ```bash
 cd driver
@@ -161,20 +207,36 @@ inside a shelled-out command.
 
 ## Testing a dispute end-to-end
 
-**Stripe test mode** supports triggering a synthetic dispute using a special
-test card number (`4000000000000259`) when creating a PaymentIntent — the
-dispute appears on the PaymentIntent shortly after the charge succeeds. See
-Stripe's testing docs for the current list of dispute-triggering test cards.
+**Stripe test mode**: fully self-serve, and used to produce this repo's
+live-verified `get-payment-dispute` result. `driver/init-stripe-dispute.ts`
+creates a PaymentIntent using the documented `pm_card_createDispute` test
+PaymentMethod with `confirm: true` — the charge succeeds and Stripe
+auto-disputes it (as fraudulent) within a few seconds; the script polls
+`GET /v1/disputes?payment_intent=<id>` until it appears.
 
 **Paystack test mode**: checked (Paystack's OpenAPI spec plus general web
 search) and there does not appear to be a publicly documented equivalent to
-Stripe's dispute-triggering test cards — Paystack's test-mode docs cover
-card/PIN/OTP test values for payment flows but not synthetic dispute
+Stripe's dispute-triggering test PaymentMethods — Paystack's test-mode docs
+cover card/PIN/OTP test values for payment flows but not synthetic dispute
 creation. `check-order` (transaction verify) is fully testable against
-Paystack's sandbox as-is; exercising `get-payment-dispute` and
-`submit-dispute-evidence` end-to-end needs either a real dispute or
-whatever manual test-data support Paystack's dashboard/support team can
-provide, since there's no self-serve way to fabricate one.
+Paystack's sandbox as-is; exercising `get-payment-dispute` end-to-end needs
+either a real dispute or whatever manual test-data support Paystack's
+dashboard/support team can provide, since there's no self-serve way to
+fabricate one.
+
+**`submit-dispute-evidence` on Paystack** additionally needs this test
+tenant's own T3N user profile to have a verified email and phone (so
+`{{profile.verified_contacts.*}}` resolves). The documented path
+(`driver/setup-profile.ts`: `otpRequest` → `otpVerify` → `submitUserInput`)
+hit a consistent, repeatable host-side error on both attempts —
+`host/otp.verify: Email provider temporarily unavailable` — tracing into
+the SDK confirmed `otpRequest` dispatches the correct `otp-request` action
+(not an SDK-side mislabel), so this reads as a genuine testnet
+email-delivery outage rather than anything fixable from the contract or
+driver side. Caveat: two attempts a few seconds apart can't fully rule out
+a short-lived blip, so this is reported as observed-at-time-of-testing
+rather than a third confirmed platform bug on the same footing as the two
+above.
 
 ## Deployment status
 

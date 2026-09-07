@@ -21,7 +21,7 @@ pub struct CheckOrderReq {
     pub provider: Provider,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, serde::Serialize)]
 pub struct OrderStatus {
     pub id: String,
     pub status: String,
@@ -59,6 +59,56 @@ pub fn check_order(input: &[u8]) -> Result<Vec<u8>, String> {
 #[cfg(target_arch = "wasm32")]
 use crate::host::interfaces::{http as http_iface, logging};
 
+/// Parses a Stripe PaymentIntent response into `OrderStatus`. Pure function
+/// (no host calls) so it compiles and runs under plain `cargo test` — see
+/// the fixture-based tests below, which exercise this against a real
+/// captured Stripe response, not a hand-typed guess at the shape.
+fn parse_stripe_order_response(pi: &serde_json::Value) -> Result<OrderStatus, String> {
+    let id = pi["id"].as_str().ok_or("missing id")?.to_string();
+    let status = pi["status"].as_str().ok_or("missing status")?.to_string();
+    let amount = pi["amount"].as_i64().ok_or("missing amount")?;
+    let currency = pi["currency"].as_str().ok_or("missing currency")?.to_string();
+    let created = pi["created"]
+        .as_i64()
+        .ok_or("missing created")?
+        .to_string();
+
+    Ok(OrderStatus {
+        id,
+        status,
+        amount,
+        currency,
+        created,
+    })
+}
+
+/// Parses a Paystack `transaction/verify` response into `OrderStatus`. Pure
+/// function — see `parse_stripe_order_response`.
+fn parse_paystack_order_response(wrapper: &serde_json::Value) -> Result<OrderStatus, String> {
+    let data = &wrapper["data"];
+
+    let id = data["id"]
+        .as_i64()
+        .map(|n| n.to_string())
+        .or_else(|| data["id"].as_str().map(|s| s.to_string()))
+        .ok_or("missing data.id")?;
+    let status = data["status"].as_str().ok_or("missing data.status")?.to_string();
+    let amount = data["amount"].as_i64().ok_or("missing data.amount")?;
+    let currency = data["currency"]
+        .as_str()
+        .ok_or("missing data.currency")?
+        .to_string();
+    let created = data["created_at"].as_str().unwrap_or_default().to_string();
+
+    Ok(OrderStatus {
+        id,
+        status,
+        amount,
+        currency,
+        created,
+    })
+}
+
 #[cfg(target_arch = "wasm32")]
 fn check_order_stripe(payment_intent_id: &str) -> Result<OrderStatus, String> {
     let api_key = crate::provider::get_secret(Provider::Stripe)?;
@@ -81,27 +131,14 @@ fn check_order_stripe(payment_intent_id: &str) -> Result<OrderStatus, String> {
 
     let pi: serde_json::Value =
         serde_json::from_slice(&resp.payload).map_err(|e| e.to_string())?;
-
-    let id = pi["id"].as_str().ok_or("missing id")?.to_string();
-    let status = pi["status"].as_str().ok_or("missing status")?.to_string();
-    let amount = pi["amount"].as_i64().ok_or("missing amount")?;
-    let currency = pi["currency"].as_str().ok_or("missing currency")?.to_string();
-    let created = pi["created"]
-        .as_i64()
-        .ok_or("missing created")?
-        .to_string();
+    let result = parse_stripe_order_response(&pi)?;
 
     let _ = logging::info(&alloc::format!(
-        "check-order[stripe]: {id} status={status} amount={amount} {currency}"
+        "check-order[stripe]: {} status={} amount={} {}",
+        result.id, result.status, result.amount, result.currency
     ));
 
-    Ok(OrderStatus {
-        id,
-        status,
-        amount,
-        currency,
-        created,
-    })
+    Ok(result)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -126,32 +163,14 @@ fn check_order_paystack(reference: &str) -> Result<OrderStatus, String> {
 
     let wrapper: serde_json::Value =
         serde_json::from_slice(&resp.payload).map_err(|e| e.to_string())?;
-    let data = &wrapper["data"];
-
-    let id = data["id"]
-        .as_i64()
-        .map(|n| n.to_string())
-        .or_else(|| data["id"].as_str().map(|s| s.to_string()))
-        .ok_or("missing data.id")?;
-    let status = data["status"].as_str().ok_or("missing data.status")?.to_string();
-    let amount = data["amount"].as_i64().ok_or("missing data.amount")?;
-    let currency = data["currency"]
-        .as_str()
-        .ok_or("missing data.currency")?
-        .to_string();
-    let created = data["created_at"].as_str().unwrap_or_default().to_string();
+    let result = parse_paystack_order_response(&wrapper)?;
 
     let _ = logging::info(&alloc::format!(
-        "check-order[paystack]: {id} status={status} amount={amount} {currency}"
+        "check-order[paystack]: {} status={} amount={} {}",
+        result.id, result.status, result.amount, result.currency
     ));
 
-    Ok(OrderStatus {
-        id,
-        status,
-        amount,
-        currency,
-        created,
-    })
+    Ok(result)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -214,5 +233,68 @@ mod tests {
         assert!(result
             .unwrap_err()
             .contains("only implemented on the wasm32 target"));
+    }
+
+    /// Real response captured from a live `check-order` call against Stripe
+    /// test mode during this contract's development (PaymentIntent
+    /// `pi_3UD7joLIEmw77WfU1iRrUsJe`) — not a hand-typed guess at the shape.
+    #[test]
+    fn parse_stripe_order_response_matches_live_capture() {
+        let fixture = serde_json::json!({
+            "id": "pi_3UD7joLIEmw77WfU1iRrUsJe",
+            "object": "payment_intent",
+            "status": "requires_payment_method",
+            "amount": 5000,
+            "currency": "usd",
+            "created": 1788807472
+        });
+        let result = parse_stripe_order_response(&fixture).unwrap();
+        assert_eq!(result.id, "pi_3UD7joLIEmw77WfU1iRrUsJe");
+        assert_eq!(result.status, "requires_payment_method");
+        assert_eq!(result.amount, 5000);
+        assert_eq!(result.currency, "usd");
+        assert_eq!(result.created, "1788807472");
+    }
+
+    #[test]
+    fn parse_stripe_order_response_missing_field_errs() {
+        let fixture = serde_json::json!({ "id": "pi_x", "status": "succeeded" });
+        let result = parse_stripe_order_response(&fixture);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing amount"));
+    }
+
+    /// Real response captured from a live `check-order` call against
+    /// Paystack (transaction reference `rrsgjyd5yv`, a real 2022
+    /// transaction) — not a hand-typed guess at the shape.
+    #[test]
+    fn parse_paystack_order_response_matches_live_capture() {
+        let fixture = serde_json::json!({
+            "status": true,
+            "message": "Verification successful",
+            "data": {
+                "id": 1983692332,
+                "domain": "test",
+                "status": "success",
+                "reference": "rrsgjyd5yv",
+                "amount": 500000,
+                "currency": "NGN",
+                "created_at": "2022-07-29T23:25:08.000Z"
+            }
+        });
+        let result = parse_paystack_order_response(&fixture).unwrap();
+        assert_eq!(result.id, "1983692332");
+        assert_eq!(result.status, "success");
+        assert_eq!(result.amount, 500000);
+        assert_eq!(result.currency, "NGN");
+        assert_eq!(result.created, "2022-07-29T23:25:08.000Z");
+    }
+
+    #[test]
+    fn parse_paystack_order_response_missing_field_errs() {
+        let fixture = serde_json::json!({ "status": true, "data": { "id": 1 } });
+        let result = parse_paystack_order_response(&fixture);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing data.status"));
     }
 }
