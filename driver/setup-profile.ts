@@ -41,6 +41,6 @@ const did = await t3n.authenticate(createEthAuthInput(address));
 console.log("Authenticated as:", did.value);
 
 const emailResult = await t3n.otpRequest({
-  emailChannel: { emailAddress: "z-tenant-dispute-test@example.com" },
+  emailChannel: { emailAddress: "ezedikecollins@gmail.com" },
 });
 console.log("otpRequest (email) result:", JSON.stringify(emailResult, null, 2));
