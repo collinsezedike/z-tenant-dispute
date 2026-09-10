@@ -2,7 +2,7 @@
 name = "z-tenant-dispute"
 version = "0.2.0"
 edition = "2021"
-description = "E-commerce chargeback & dispute agent for T3N tenants (Stripe + Paystack) — order + dispute status lookups (no PII) + PII-safe evidence submission via host:interfaces/http-with-placeholders"
+description = "E-commerce chargeback & dispute agent for T3N tenants (Stripe + Paystack). Order + dispute status lookups (no PII) plus PII-safe evidence submission via host:interfaces/http-with-placeholders"
 license = "MIT"
 publish = false
 

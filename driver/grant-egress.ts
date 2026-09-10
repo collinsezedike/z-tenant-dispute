@@ -2,11 +2,11 @@
 // functions and reach the payment-processor hosts they call out to.
 // Without this, outbound calls fail with `host/http.egress_denied` even
 // though the contract itself executes fine (auth + KV read both succeed
-// first) — the allowlist is enforced against the *caller's* grant, not
+// first). The allowlist is enforced against the *caller's* grant, not
 // anything declared by the contract.
 //
 // Uses `t3n.agentAuthUpdate()` directly per the ADK docs'
-// (developers/adk/tips) documented self-grant pattern — the SDK's newer
+// (developers/adk/tips) documented self-grant pattern. The SDK's newer
 // delegation APIs (`setGrants`, `MemberDelegationDoc`) are org-scoped and
 // don't apply to an individually self-admitted testnet tenant like this one.
 //

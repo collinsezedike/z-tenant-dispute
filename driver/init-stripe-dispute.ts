@@ -1,7 +1,7 @@
 // Creates a real Stripe test-mode PaymentIntent using the documented
-// `pm_card_createDispute` PaymentMethod (docs.stripe.com/testing —
+// `pm_card_createDispute` PaymentMethod (docs.stripe.com/testing,
 // "Testing Disputes"), which succeeds and then gets auto-disputed shortly
-// after — giving us a genuine dispute id to test `get-payment-dispute` and
+// after, giving us a genuine dispute id to test `get-payment-dispute` and
 // `submit-dispute-evidence` against. Test-data setup only, doesn't go
 // through the contract. Reads `stripe_secret_key` back and uses it only
 // inside fetch() calls, never passed to a subprocess.
@@ -52,7 +52,7 @@ const tenant = new TenantClient({
 
 const stripeKey = await tenant.maps.entryGet("secrets", "stripe_secret_key");
 if (!stripeKey) {
-  throw new Error("stripe_secret_key not found — run seed-secret.ts first");
+  throw new Error("stripe_secret_key not found. Run seed-secret.ts first");
 }
 
 function authHeaders() {
@@ -75,11 +75,11 @@ const piResp = await fetch("https://api.stripe.com/v1/payment_intents", {
 });
 const pi = await piResp.json();
 if (!piResp.ok) {
-  throw new Error(`create PaymentIntent failed: HTTP ${piResp.status} — ${JSON.stringify(pi)}`);
+  throw new Error(`create PaymentIntent failed: HTTP ${piResp.status}: ${JSON.stringify(pi)}`);
 }
 console.log("PaymentIntent id:", pi.id, "status:", pi.status);
 
-// The dispute appears shortly after confirmation — poll a few times.
+// The dispute appears shortly after confirmation. Poll a few times.
 let disputeId: string | undefined;
 for (let attempt = 1; attempt <= 8 && !disputeId; attempt++) {
   await new Promise((r) => setTimeout(r, 3000));
@@ -96,7 +96,7 @@ for (let attempt = 1; attempt <= 8 && !disputeId; attempt++) {
 }
 
 if (!disputeId) {
-  throw new Error("No dispute appeared after polling — try re-running or check Stripe dashboard.");
+  throw new Error("No dispute appeared after polling. Try re-running or check Stripe dashboard.");
 }
 
 console.log("Dispute id:", disputeId);

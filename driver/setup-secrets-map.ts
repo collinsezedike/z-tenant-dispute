@@ -1,16 +1,16 @@
 // One-time setup: creates the tenant's `secrets` KV map before any secret
 // can be written to it. `map-entry-set` (used by seed-secret.ts) writes into
-// an existing map — it does not create one, and fails with `map not found`
+// an existing map, it does not create one, and fails with `map not found`
 // if this hasn't been run first.
 //
 // Readers/writers are scoped to the current contract id only (least
-// privilege) — matches the pattern in the ADK docs
+// privilege), matching the pattern in the ADK docs
 // (developers/adk/tips/create-kv-maps). The writers restriction doesn't
 // affect control-plane writes (seed-secret.ts uses map-entry-set, which
 // bypasses it and always works for the map owner).
 //
 // IMPORTANT: re-registering the contract (a version bump, e.g. 0.2.0 ->
-// 0.3.0) allocates a NEW contract_id — see README "Deployment status". This
+// 0.3.0) allocates a NEW contract_id. See README "Deployment status". This
 // operation is idempotent (per the docs, "safe to re-run during
 // redeployment"), so just re-run it with the new id after a redeploy.
 //

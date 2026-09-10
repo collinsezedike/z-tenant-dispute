@@ -1,7 +1,7 @@
 // Attempts to populate this test tenant's own T3N user profile
 // (first_name/last_name/verified email+phone) so the
 // `{{profile.verified_contacts.*}}` placeholders used by
-// submit-dispute-evidence can actually resolve. Diagnostic/setup script —
+// submit-dispute-evidence can actually resolve. Diagnostic/setup script,
 // prints raw OTP flow responses to learn whether testnet runs skip_otp.
 //
 // Usage:

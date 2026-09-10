@@ -1,11 +1,11 @@
-//! z-tenant-dispute v0.2.0 — e-commerce chargeback & dispute agent.
+//! z-tenant-dispute v0.2.0 is an e-commerce chargeback & dispute agent.
 //!
 //! Given a disputed transaction, this contract:
 //!   - `check-order`: looks up the underlying payment/order status (no PII).
 //!   - `get-payment-dispute`: looks up the chargeback/dispute status (no PII).
 //!   - `submit-dispute-evidence`: assembles and submits dispute evidence to
 //!     the payment processor. Each function accepts an optional `provider`
-//!     field (`stripe` or `paystack`, defaulting to `stripe`) — see
+//!     field (`stripe` or `paystack`, defaulting to `stripe`); see
 //!     `provider.rs`. The disputing customer's name and contact info are
 //!     NEVER passed in as a contract argument: the contract templates
 //!     `{{profile.<field>}}` markers into the evidence body and the host's
@@ -33,7 +33,7 @@
 //! # Setup
 //!
 //! Before first use, the tenant SDK must write the relevant provider's
-//! secret key into the tenant's `secrets` KV map — see `driver/` for the
+//! secret key into the tenant's `secrets` KV map; see `driver/` for the
 //! actual script pattern.
 #![warn(clippy::style, missing_debug_implementations)]
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

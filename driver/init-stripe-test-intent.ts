@@ -1,8 +1,8 @@
 // Creates a real Stripe test-mode PaymentIntent, purely so we have a
 // genuine id to test `check-order` against. Does NOT go through the
-// contract — test-data setup only. Reads the already-seeded
+// contract; test-data setup only. Reads the already-seeded
 // `stripe_secret_key` back via the tenant control-plane and uses it only
-// inside a native fetch() call — never passed to a subprocess / shell
+// inside a native fetch() call, never passed to a subprocess / shell
 // command, so it can't leak via a shelled-out error message the way an
 // earlier version of this kind of script did for Paystack.
 //
@@ -52,7 +52,7 @@ const tenant = new TenantClient({
 
 const stripeKey = await tenant.maps.entryGet("secrets", "stripe_secret_key");
 if (!stripeKey) {
-  throw new Error("stripe_secret_key not found — run seed-secret.ts first");
+  throw new Error("stripe_secret_key not found. Run seed-secret.ts first");
 }
 
 const resp = await fetch("https://api.stripe.com/v1/payment_intents", {
@@ -70,7 +70,7 @@ const resp = await fetch("https://api.stripe.com/v1/payment_intents", {
 
 const body = await resp.json();
 if (!resp.ok) {
-  throw new Error(`Stripe create PaymentIntent failed: HTTP ${resp.status} — ${JSON.stringify(body)}`);
+  throw new Error(`Stripe create PaymentIntent failed: HTTP ${resp.status}: ${JSON.stringify(body)}`);
 }
 
 console.log("PaymentIntent id:", body.id);

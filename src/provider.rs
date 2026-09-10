@@ -4,7 +4,7 @@
 //! to `stripe`, so anything already registered/tested against Stripe keeps
 //! working unchanged) and branches between provider-specific request/response
 //! handling in `order.rs`, `dispute.rs`, and `evidence.rs`. The WIT interface
-//! and PII-placeholder mechanism are identical either way — only the HTTP
+//! and PII-placeholder mechanism are identical either way; only the HTTP
 //! shapes differ.
 
 #[derive(serde::Deserialize, Default, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +32,7 @@ pub fn get_secret(provider: Provider) -> Result<alloc::string::String, alloc::st
         .map_err(|e| alloc::format!("kv read: {e}"))?
         .ok_or_else(|| {
             alloc::format!(
-                "{} not found in z:<tid>:secrets — populate it via the tenant SDK before use",
+                "{} not found in z:<tid>:secrets. Populate it via the tenant SDK before use",
                 alloc::string::String::from_utf8_lossy(key_name)
             )
         })?;

@@ -6,7 +6,7 @@
 //!
 //! The Paystack response fields are verified against Paystack's published
 //! OpenAPI spec (github.com/PaystackOSS/openapi, `dist/paystack.yaml`,
-//! `DisputeFetchResponse` schema) — not a live call, but the actual
+//! `DisputeFetchResponse` schema), not a live call, but the actual
 //! contract Paystack publishes, not a guess. One field (`dueAt`) is typed
 //! only as `nullable: true` in that spec with no explicit type, so its
 //! string-ness is inferred by analogy with sibling fields and parsed
@@ -56,8 +56,8 @@ pub fn get_payment_dispute(input: &[u8]) -> Result<Vec<u8>, String> {
     }
 }
 
-/// Parses a Stripe Dispute response into `DisputeStatus`. Pure function —
-/// see the fixture-based tests below, one against a real captured live
+/// Parses a Stripe Dispute response into `DisputeStatus`. Pure function.
+/// See the fixture-based tests below, one against a real captured live
 /// response.
 fn parse_stripe_dispute_response(d: &serde_json::Value) -> Result<DisputeStatus, String> {
     let id = d["id"].as_str().ok_or("missing id")?.to_string();
@@ -80,9 +80,9 @@ fn parse_stripe_dispute_response(d: &serde_json::Value) -> Result<DisputeStatus,
     })
 }
 
-/// Parses a Paystack Dispute response into `DisputeStatus`. Pure function —
-/// see the fixture-based test below, built from Paystack's verified
-/// `DisputeFetchResponse` OpenAPI schema (not a live call — Paystack has no
+/// Parses a Paystack Dispute response into `DisputeStatus`. Pure function.
+/// See the fixture-based test below, built from Paystack's verified
+/// `DisputeFetchResponse` OpenAPI schema (not a live call, Paystack has no
 /// self-serve way to create a test dispute; see README "Testing a dispute
 /// end-to-end").
 fn parse_paystack_dispute_response(wrapper: &serde_json::Value) -> Result<DisputeStatus, String> {
@@ -96,7 +96,7 @@ fn parse_paystack_dispute_response(wrapper: &serde_json::Value) -> Result<Disput
     let status = data["status"].as_str().ok_or("missing data.status")?.to_string();
     let reason = data["category"].as_str().ok_or("missing data.category")?.to_string();
     // The Dispute object has no top-level `amount` field (confirmed against
-    // Paystack's published OpenAPI spec) — only `refund_amount`, which is a
+    // Paystack's published OpenAPI spec), only `refund_amount`, which is a
     // resolution-time figure, and the original disputed amount nested at
     // `data.transaction.amount`. The latter is the correct match for
     // Stripe's `dispute.amount` semantics ("the amount in question"), so
@@ -107,7 +107,7 @@ fn parse_paystack_dispute_response(wrapper: &serde_json::Value) -> Result<Disput
     let currency = data["currency"].as_str().ok_or("missing data.currency")?.to_string();
     // `dueAt` is confirmed as the real field name (Paystack OpenAPI spec),
     // but the spec declares it only as `nullable: true` with no explicit
-    // type — inferred as an ISO-8601 string by analogy with the sibling
+    // type, inferred as an ISO-8601 string by analogy with the sibling
     // `createdAt`/`updatedAt`/`resolvedAt` fields, which the spec does type
     // as strings. Soft fallback here, not a hard failure, since that
     // inference isn't 100% certain without a live response to check.
@@ -141,7 +141,7 @@ fn get_dispute_stripe(dispute_id: &str) -> Result<DisputeStatus, String> {
     if resp.code != 200 {
         let body = alloc::string::String::from_utf8_lossy(&resp.payload);
         return Err(alloc::format!(
-            "Stripe dispute lookup failed: HTTP {} — {body}",
+            "Stripe dispute lookup failed: HTTP {}: {body}",
             resp.code
         ));
     }
@@ -173,7 +173,7 @@ fn get_dispute_paystack(dispute_id: &str) -> Result<DisputeStatus, String> {
     if resp.code != 200 {
         let body = alloc::string::String::from_utf8_lossy(&resp.payload);
         return Err(alloc::format!(
-            "Paystack dispute lookup failed: HTTP {} — {body}",
+            "Paystack dispute lookup failed: HTTP {}: {body}",
             resp.code
         ));
     }
@@ -239,7 +239,7 @@ mod tests {
     /// Real response captured from a live `get-payment-dispute` call
     /// against Stripe test mode during this contract's development
     /// (dispute `du_1UD7wGLIEmw77WfU9BIC0xDT`, created via
-    /// `pm_card_createDispute`) — not a hand-typed guess at the shape.
+    /// `pm_card_createDispute`), not a hand-typed guess at the shape.
     #[test]
     fn parse_stripe_dispute_response_matches_live_capture() {
         let fixture = serde_json::json!({
@@ -270,7 +270,7 @@ mod tests {
 
     /// Fixture built from Paystack's verified `DisputeFetchResponse`
     /// OpenAPI schema (github.com/PaystackOSS/openapi,
-    /// `dist/paystack.yaml`) — field names and nesting are confirmed
+    /// `dist/paystack.yaml`), field names and nesting are confirmed
     /// against the published spec, not guessed. Not a live capture:
     /// Paystack has no self-serve way to create a test dispute (see
     /// README "Testing a dispute end-to-end"), so this is the strongest
@@ -354,7 +354,7 @@ mod tests {
                 "status": "pending",
                 "category": "chargeback",
                 "currency": "NGN",
-                "amount": 999999, // must NOT be read — not a real field on this object
+                "amount": 999999, // must NOT be read, not a real field on this object
                 "transaction": {}
             }
         });

@@ -5,7 +5,7 @@
 //! (name, email) is NEVER passed in as a contract argument. The contract
 //! templates `{{profile.<path>}}` markers into the evidence body and the
 //! host's `http-with-placeholders` interface resolves them from the calling
-//! user's profile at dispatch time — substitution happens host-side, after
+//! user's profile at dispatch time. Substitution happens host-side, after
 //! this contract serialises the body and before the outbound call, so
 //! plaintext customer PII never enters WASM memory.
 //!
@@ -15,24 +15,24 @@
 //! markers stay intact for the host to recognise and substitute. Paystack's
 //! `Add Evidence` endpoint takes plain JSON with `customer_name` /
 //! `customer_email` / `customer_phone` fields, so the placeholder markers go
-//! in as ordinary JSON string values — no custom encoding needed there.
+//! in as ordinary JSON string values; no custom encoding needed there.
 //!
 //! CONFIRMED PLATFORM LIMITATION (live-tested, not a guess): the Stripe path
 //! above cannot currently succeed on T3N testnet. `http-with-placeholders`
-//! parses the *resolved* body as JSON before forwarding it upstream — a
+//! parses the *resolved* body as JSON before forwarding it upstream. A
 //! form-urlencoded body fails host-side with
 //! `upstream: parse resolved body: expected value at line 1 column 1`
 //! before the request ever reaches Stripe. Stripe's `/v1/disputes/:id`, in
 //! turn, explicitly rejects a JSON body
-//! (`"check that your POST content type is application/x-www-form-urlencoded"`)
-//! — verified directly against the live Stripe API, not assumed. These two
+//! (`"check that your POST content type is application/x-www-form-urlencoded"`),
+//! verified directly against the live Stripe API, not assumed. These two
 //! requirements are mutually exclusive, so no header or encoding choice on
 //! the contract's side can reconcile them; this needs either a
 //! non-JSON-only `http-with-placeholders` mode on the host, or a Stripe
 //! integration path that doesn't need one. The Paystack path is unaffected
 //! (its API is JSON-native) and is confirmed working up to the point where
 //! the *calling user's* T3N profile needs `verified_contacts.phone.value`
-//! populated (`PlaceholderUnknown` otherwise — a caller-account gap, not a
+//! populated (`PlaceholderUnknown` otherwise, a caller-account gap, not a
 //! contract bug).
 
 use crate::provider::Provider;
@@ -40,7 +40,7 @@ use crate::provider::Provider;
 #[derive(serde::Deserialize)]
 pub struct SubmitEvidenceReq {
     pub dispute_id: String,
-    /// Opaque order reference used only in the evidence narrative — not PII.
+    /// Opaque order reference used only in the evidence narrative, not PII.
     pub order_id: String,
     pub product_description: String,
     #[serde(default)]
@@ -80,7 +80,7 @@ pub fn submit_dispute_evidence(input: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Percent-encode a value for an `application/x-www-form-urlencoded` body,
 /// leaving `{`, `}`, and `.` unescaped so `{{profile.x}}` markers stay
-/// intact for host-side placeholder resolution. Stripe-only — Paystack's
+/// intact for host-side placeholder resolution. Stripe-only; Paystack's
 /// JSON body needs no such encoding. Pure function, testable natively.
 fn form_encode(s: &str) -> alloc::string::String {
     let mut out = alloc::string::String::with_capacity(s.len());
@@ -98,7 +98,7 @@ fn form_encode(s: &str) -> alloc::string::String {
 
 /// Builds the Stripe dispute-update body: form-urlencoded, with
 /// `{{profile.x}}` placeholder markers for the customer's identity. Pure
-/// function — see the tests below, including one proving this body is
+/// function. See the tests below, including one proving this body is
 /// (correctly, per Stripe's own requirement) NOT valid JSON, which is
 /// exactly why it can't currently pass through T3N's `http-with-placeholders`
 /// (see Bug #2 in the module doc comment / README).
@@ -138,7 +138,7 @@ fn parse_stripe_evidence_response(d: &serde_json::Value) -> Result<EvidenceResul
 }
 
 /// Parses a Paystack Add Evidence response into `EvidenceResult`. Pure
-/// function — see the fixture-based test below, built from Paystack's
+/// function. See the fixture-based test below, built from Paystack's
 /// verified `DisputeAddEvidenceResponse` OpenAPI schema.
 fn parse_paystack_evidence_response(wrapper: &serde_json::Value) -> EvidenceResult {
     let data = &wrapper["data"];
@@ -239,7 +239,7 @@ fn submit_evidence_paystack(req: &SubmitEvidenceReq) -> Result<EvidenceResult, S
 }
 
 /// Render a typed `http-with-placeholders` error as a contract-facing string.
-/// Never includes resolved PII — only field names and host-side reasons.
+/// Never includes resolved PII, only field names and host-side reasons.
 #[cfg(target_arch = "wasm32")]
 fn format_http_error(e: hwp::HttpError) -> alloc::string::String {
     match e {
@@ -353,7 +353,7 @@ mod tests {
     fn stripe_evidence_body_carries_unmodified_placeholder_markers() {
         let body = build_stripe_evidence_body("ORD-7219", "Dinner for two");
         // form_encode leaves `{`, `}`, `.` unescaped so the host recognises
-        // the markers — assert the exact literal markers survive intact.
+        // the markers. Assert the exact literal markers survive intact.
         assert!(body.contains("{{profile.first_name}}"));
         assert!(body.contains("{{profile.last_name}}"));
         assert!(body.contains("{{profile.verified_contacts.email.value}}"));
@@ -373,11 +373,11 @@ mod tests {
     /// This is the concrete, runnable proof behind Bug #2 (see the module
     /// doc comment and README "Known issues"): T3N's `http-with-placeholders`
     /// parses the resolved body as JSON before forwarding it upstream.
-    /// Stripe's body — built to Stripe's real, required
-    /// `application/x-www-form-urlencoded` spec — is provably NOT valid
+    /// Stripe's body, built to Stripe's real, required
+    /// `application/x-www-form-urlencoded` spec, is provably NOT valid
     /// JSON, which is exactly why the live host call fails with
     /// `parse resolved body: expected value at line 1 column 1`. Paystack's
-    /// JSON body, by contrast, parses cleanly — exactly why that path
+    /// JSON body, by contrast, parses cleanly. Exactly why that path
     /// reaches real placeholder resolution live. Not asserted from prose;
     /// asserted from the actual bytes this contract sends.
     #[test]
@@ -388,7 +388,7 @@ mod tests {
         assert!(
             stripe_parse_result.is_err(),
             "Stripe's evidence body must NOT be valid JSON (it's the required \
-             form-urlencoded shape) — this is the root cause of Bug #2, not \
+             form-urlencoded shape), this is the root cause of Bug #2, not \
              an accident to fix"
         );
 
@@ -398,7 +398,7 @@ mod tests {
             serde_json::from_slice(&paystack_bytes);
         assert!(
             paystack_parse_result.is_ok(),
-            "Paystack's evidence body IS valid JSON — this is why that path \
+            "Paystack's evidence body IS valid JSON, this is why that path \
              reaches real placeholder resolution live, unlike Stripe's"
         );
     }
@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn parse_stripe_evidence_response_matches_real_shape() {
         // Stripe's Dispute object shape (id, status) is already
-        // live-verified via get-payment-dispute — this fixture reuses that
+        // live-verified via get-payment-dispute. This fixture reuses that
         // confirmed shape for the post-update response, which mirrors it.
         let fixture = serde_json::json!({
             "id": "du_1UD7wGLIEmw77WfU9BIC0xDT",
@@ -419,8 +419,8 @@ mod tests {
     }
 
     /// Fixture built from Paystack's verified `DisputeAddEvidenceResponse`
-    /// OpenAPI schema (github.com/PaystackOSS/openapi, `dist/paystack.yaml`)
-    /// — not a live capture, since reaching this response requires a
+    /// OpenAPI schema (github.com/PaystackOSS/openapi, `dist/paystack.yaml`),
+    /// not a live capture, since reaching this response requires a
     /// verified caller profile (see README), but the shape is confirmed
     /// against the published spec.
     #[test]

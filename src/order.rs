@@ -4,9 +4,9 @@
 //! (defaults to `stripe`):
 //!   - Stripe: treats a PaymentIntent as the order record.
 //!   - Paystack: verifies a transaction by its reference.
-//! Both paths are plain synchronous HTTP calls — no PII either way. To swap
+//! Both paths are plain synchronous HTTP calls, no PII either way. To swap
 //! in a different order-management system entirely, add a new `Provider`
-//! variant and a matching branch here — the WIT interface, secret-handling
+//! variant and a matching branch here. The WIT interface, secret-handling
 //! pattern, and PII-placeholder mechanism (used only in `evidence.rs`) stay
 //! the same.
 
@@ -60,7 +60,7 @@ pub fn check_order(input: &[u8]) -> Result<Vec<u8>, String> {
 use crate::host::interfaces::{http as http_iface, logging};
 
 /// Parses a Stripe PaymentIntent response into `OrderStatus`. Pure function
-/// (no host calls) so it compiles and runs under plain `cargo test` — see
+/// (no host calls) so it compiles and runs under plain `cargo test`. See
 /// the fixture-based tests below, which exercise this against a real
 /// captured Stripe response, not a hand-typed guess at the shape.
 fn parse_stripe_order_response(pi: &serde_json::Value) -> Result<OrderStatus, String> {
@@ -83,7 +83,7 @@ fn parse_stripe_order_response(pi: &serde_json::Value) -> Result<OrderStatus, St
 }
 
 /// Parses a Paystack `transaction/verify` response into `OrderStatus`. Pure
-/// function — see `parse_stripe_order_response`.
+/// function. See `parse_stripe_order_response`.
 fn parse_paystack_order_response(wrapper: &serde_json::Value) -> Result<OrderStatus, String> {
     let data = &wrapper["data"];
 
@@ -124,7 +124,7 @@ fn check_order_stripe(payment_intent_id: &str) -> Result<OrderStatus, String> {
     if resp.code != 200 {
         let body = alloc::string::String::from_utf8_lossy(&resp.payload);
         return Err(alloc::format!(
-            "Stripe payment-intent lookup failed: HTTP {} — {body}",
+            "Stripe payment-intent lookup failed: HTTP {}: {body}",
             resp.code
         ));
     }
@@ -156,7 +156,7 @@ fn check_order_paystack(reference: &str) -> Result<OrderStatus, String> {
     if resp.code != 200 {
         let body = alloc::string::String::from_utf8_lossy(&resp.payload);
         return Err(alloc::format!(
-            "Paystack transaction verify failed: HTTP {} — {body}",
+            "Paystack transaction verify failed: HTTP {}: {body}",
             resp.code
         ));
     }
@@ -212,7 +212,7 @@ mod tests {
         }))
         .unwrap();
         // Still routes to the (unimplemented-off-wasm) provider path rather
-        // than failing input parsing — proves the `alias` keeps the old
+        // than failing input parsing, proves the `alias` keeps the old
         // field name working.
         let result = check_order(&input);
         assert!(result.is_err());
@@ -237,7 +237,7 @@ mod tests {
 
     /// Real response captured from a live `check-order` call against Stripe
     /// test mode during this contract's development (PaymentIntent
-    /// `pi_3UD7joLIEmw77WfU1iRrUsJe`) — not a hand-typed guess at the shape.
+    /// `pi_3UD7joLIEmw77WfU1iRrUsJe`), not a hand-typed guess at the shape.
     #[test]
     fn parse_stripe_order_response_matches_live_capture() {
         let fixture = serde_json::json!({
@@ -266,7 +266,7 @@ mod tests {
 
     /// Real response captured from a live `check-order` call against
     /// Paystack (transaction reference `rrsgjyd5yv`, a real 2022
-    /// transaction) — not a hand-typed guess at the shape.
+    /// transaction), not a hand-typed guess at the shape.
     #[test]
     fn parse_paystack_order_response_matches_live_capture() {
         let fixture = serde_json::json!({
