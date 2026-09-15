@@ -194,8 +194,10 @@ npx tsx seed-secret.ts paystack_secret_key sk_test_xxxxxxxx
 npx tsx invoke.ts check-order '{"order_ref":"T123456","provider":"paystack"}'
 ```
 
-`package.json` pins `@terminal3/t3n-sdk` to exactly `5.2.0`. See "Known
-issue" below for why that pin is load-bearing, not incidental.
+`package.json` pins `@terminal3/t3n-sdk` to exactly `5.2.0`, the version
+this repo's live verification was developed and run against. The pin is
+no longer required (Issue #1 was resolved by T3N on Sep 15, and the
+latest SDK now works against testnet) and is kept for reproducibility.
 
 **Security note:** never pass a secret key as a shell/CLI argument to a
 subprocess you don't fully control the error handling of. An earlier pass
@@ -250,10 +252,11 @@ one self-inflicted, one real:
 
 ## Deployment status
 
-Registered and live on T3N testnet (v0.2.0, dual-provider). All live
-results below date from Sep 7-11, when the testnet was reachable; see
-"Known issues filed against T3N" (Issue #4) for the cluster state
-change observed Sep 15.
+Registered and live on T3N testnet (v0.2.0, dual-provider). The live
+results below date from Sep 7-11; a testnet attestation regression on
+Sep 15 (Issue #4) briefly blocked all authentication and was resolved
+by T3N the same day, confirmed by a fresh successful handshake and
+authentication during the Sep 15 retest.
 
 ```json
 {
@@ -324,11 +327,17 @@ profile not having that field populated).
 
 ### Issue #1: `fetchTrustedManifest` regression
 
-The ADK quickstart's `fetchTrustedManifest("testnet")` fails with
+The ADK quickstart's `fetchTrustedManifest("testnet")` failed with
 `Trust manifest ... is malformed` on every published SDK version from
-`5.3.0` through the current latest (`5.15.2` as of a Sep 15 retest),
-including the versions the quickstart docs currently have you install
-fresh.
+`5.3.0` through `5.15.2`, including the versions the quickstart docs
+had you install fresh.
+
+**Resolved Sep 15.** T3N re-signed and republished the testnet trust
+manifest (v1789446184, signed 04:23 UTC), now including the required
+`rtmr1_allowlist` field. Verified fixed on SDK `5.15.2` (latest,
+unpinned): manifest fetch, handshake, and authentication all succeed.
+The `5.2.0` pin in `driver/package.json` is kept only for
+reproducibility of the original finding, not as a workaround.
 
 **Root cause**, confirmed by resolving the SDK's own minified string table
 directly (not guesswork): `isSignedTrustManifest()`, the shape check
@@ -413,33 +422,36 @@ including the Paystack path of `submit-dispute-evidence` in this repo.
 
 **Status:** reported to T3N directly, with the DID and request ID, for
 investigation. T3N engaged and asked for the email address (provided
-Sep 11). A scheduled retest on Sep 15 was blocked by Issue #4 below;
-the last confirmed state, from Sep 11, is that the bug persists.
+Sep 11). Retested Sep 15 after the testnet recovery (fresh request
+`tx:127:229494`); the bug still reproduces exactly as described. The
+only one of the four issues still open.
 
-### Issue #4: testnet cluster attestation regression blocks all SDK versions (observed Sep 15)
+### Issue #4: testnet cluster attestation regression blocked all SDK versions (observed Sep 15, resolved same day)
 
-First observed Sep 15, ~03:00 UTC, reproducible across attempts. The
+Observed Sep 15, ~02:00-03:00 UTC, reproducible across attempts. The
 cluster's peer attestation state changed between the last successful
 authentication (Sep 11) and Sep 15, such that no published SDK version
-can currently complete a handshake against testnet:
+could complete a handshake against testnet:
 
 - On SDK `5.2.0` (the Issue #1 workaround pin), the manifest fetch
-  still succeeds, but the handshake now fails DKG attestation
-  verification with `0/3 quotes valid`. All three peers report an
-  RTMR3 of 48 zero bytes, which is not the allowlisted value in the
-  still-served Aug 27 manifest (v1787800421). The SDK correctly
-  refuses to encapsulate to an unverified ML-KEM key.
+  still succeeded, but the handshake failed DKG attestation
+  verification with `0/3 quotes valid`. All three peers reported an
+  RTMR3 of 48 zero bytes, which was not the allowlisted value in the
+  then-served Aug 27 manifest (v1787800421). The SDK correctly
+  refused to encapsulate to an unverified ML-KEM key.
 - On SDK `5.15.2` (latest, published Sep 11), `fetchTrustedManifest`
-  fails immediately with the Issue #1 "malformed" error, so it never
-  reaches the handshake.
+  failed immediately with the Issue #1 "malformed" error, so it never
+  reached the handshake.
 - The manifest endpoint itself intermittently returned HTTP 503
   during the same window (three consecutive 503s at 03:02 UTC, then
   recovery to 200 within about a minute).
 
-Zeroed RTMR3 registers across all peers look like a cluster
-redeployment whose new measurements were never added to the trust
-manifest, or nodes running without measurement. The observable effect
-is that live authentication, registration, and invocation are all
-currently impossible on every SDK version. All live-verification
-results recorded in this README were produced Sep 7-11, before this
-state change.
+**Resolution:** T3N re-signed the trust manifest on Sep 15 at 04:23 UTC
+(v1789446184); alongside the new `rtmr1_allowlist` (Issue #1), the
+`rtmr3_allowlist` now contains the current cluster's measurement value,
+so the handshake succeeds again on every SDK version. Verified working
+on both `5.2.0` and `5.15.2`. One observation worth flagging to T3N: the
+newly allowlisted RTMR3 is the zeroed value the failing peers were
+reporting, so the unblock appears to have been achieved by allowlisting
+the current (zeroed) measurements rather than by restoring non-zero
+attestation, which may merit a look on their side.
