@@ -250,7 +250,10 @@ one self-inflicted, one real:
 
 ## Deployment status
 
-Registered and live on T3N testnet (v0.2.0, dual-provider):
+Registered and live on T3N testnet (v0.2.0, dual-provider). All live
+results below date from Sep 7-11, when the testnet was reachable; see
+"Known issues filed against T3N" (Issue #4) for the cluster state
+change observed Sep 15.
 
 ```json
 {
@@ -323,7 +326,7 @@ profile not having that field populated).
 
 The ADK quickstart's `fetchTrustedManifest("testnet")` fails with
 `Trust manifest ... is malformed` on every published SDK version from
-`5.3.0` through the current latest (`5.7.0` at the time of writing),
+`5.3.0` through the current latest (`5.15.2` as of a Sep 15 retest),
 including the versions the quickstart docs currently have you install
 fresh.
 
@@ -409,4 +412,34 @@ then `submitUserInput` flow, which blocks any contract relying on
 including the Paystack path of `submit-dispute-evidence` in this repo.
 
 **Status:** reported to T3N directly, with the DID and request ID, for
-investigation.
+investigation. T3N engaged and asked for the email address (provided
+Sep 11). A scheduled retest on Sep 15 was blocked by Issue #4 below;
+the last confirmed state, from Sep 11, is that the bug persists.
+
+### Issue #4: testnet cluster attestation regression blocks all SDK versions (observed Sep 15)
+
+First observed Sep 15, ~03:00 UTC, reproducible across attempts. The
+cluster's peer attestation state changed between the last successful
+authentication (Sep 11) and Sep 15, such that no published SDK version
+can currently complete a handshake against testnet:
+
+- On SDK `5.2.0` (the Issue #1 workaround pin), the manifest fetch
+  still succeeds, but the handshake now fails DKG attestation
+  verification with `0/3 quotes valid`. All three peers report an
+  RTMR3 of 48 zero bytes, which is not the allowlisted value in the
+  still-served Aug 27 manifest (v1787800421). The SDK correctly
+  refuses to encapsulate to an unverified ML-KEM key.
+- On SDK `5.15.2` (latest, published Sep 11), `fetchTrustedManifest`
+  fails immediately with the Issue #1 "malformed" error, so it never
+  reaches the handshake.
+- The manifest endpoint itself intermittently returned HTTP 503
+  during the same window (three consecutive 503s at 03:02 UTC, then
+  recovery to 200 within about a minute).
+
+Zeroed RTMR3 registers across all peers look like a cluster
+redeployment whose new measurements were never added to the trust
+manifest, or nodes running without measurement. The observable effect
+is that live authentication, registration, and invocation are all
+currently impossible on every SDK version. All live-verification
+results recorded in this README were produced Sep 7-11, before this
+state change.
